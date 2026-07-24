@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
@@ -22,11 +23,14 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Warehouse)
+    private readonly warehouseRepository: Repository<Warehouse>,
     private readonly userMapper: UserMapper,
   ) {}
 
   /**
    * Create a new user with unique email and username checks.
+   * If role is TENANT_OWNER and warehouseName is provided, creates a warehouse automatically.
    */
   async create(createUserDto: CreateUserDto): Promise<UserResponseDto> {
     const emailTaken = await this.userRepository.existsBy({
@@ -41,6 +45,17 @@ export class UsersService {
     });
     if (usernameTaken) {
       throw new ConflictException('Username already in use');
+    }
+
+    // Auto-create warehouse for tenant_owner registration
+    if (!createUserDto.warehouseId && createUserDto.warehouseName) {
+      const warehouse = this.warehouseRepository.create({
+        name: createUserDto.warehouseName,
+        location: createUserDto.warehouseLocation ?? null,
+      });
+      const savedWarehouse = await this.warehouseRepository.save(warehouse);
+      createUserDto.warehouseId = savedWarehouse.id;
+      this.logger.log(`Warehouse created for new tenant: ${savedWarehouse.id}`);
     }
 
     const user = this.userMapper.toEntity(createUserDto);
@@ -127,6 +142,10 @@ export class UsersService {
 
     if (updateUserDto.warehouseId !== undefined) {
       user.warehouseId = updateUserDto.warehouseId ?? null;
+    }
+
+    if (updateUserDto.role !== undefined) {
+      user.role = updateUserDto.role;
     }
 
     const saved = await this.userRepository.save(user);
