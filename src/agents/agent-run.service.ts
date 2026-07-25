@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { Queue } from 'bullmq';
+import { InjectQueue } from '@nestjs/bullmq';
 import { AgentRun } from './entities/agent-run.entity';
 import { AgentStep } from './entities/agent-step.entity';
 import { AgentRunMapper } from './mappers/agent-run.mapper';
@@ -52,6 +54,8 @@ export class AgentRunService {
     private readonly stepRepository: Repository<AgentStep>,
     private readonly dataSource: DataSource,
     private readonly mapper: AgentRunMapper,
+    @InjectQueue('agent-jobs')
+    private readonly agentQueue: Queue,
   ) {}
 
   async start(agentType: AgentType, related: AgentRunRelatedInput = {}) {
@@ -69,6 +73,10 @@ export class AgentRunService {
 
     const saved = await this.runRepository.save(run);
     return successResponse(this.mapper.toRunResponse(saved));
+  }
+
+  async enqueue(runId: string, agentType: AgentType): Promise<void> {
+    await this.agentQueue.add('run-agent-step', { runId, agentType });
   }
 
   async load(runId: string) {
