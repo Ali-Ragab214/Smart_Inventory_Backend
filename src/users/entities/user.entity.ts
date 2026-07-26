@@ -1,4 +1,4 @@
-import { Entity, Column, Index, BeforeInsert, BeforeUpdate, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, Index, BeforeInsert, BeforeUpdate, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { AbstractEntity } from '../../shared/base.entity';
 import { Warehouse } from '../../warehouses/entities/warehouse.entity';
@@ -44,6 +44,9 @@ export class User extends AbstractEntity {
   @Index('idx_users_warehouse')
   @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
   warehouseId!: string | null;
+
+  @OneToMany(() => Warehouse, (warehouse) => warehouse.tenant)
+  ownedWarehouses!: Warehouse[];
 
   /**
    * Hashes the password before any INSERT or UPDATE.

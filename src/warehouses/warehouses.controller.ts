@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -34,8 +35,8 @@ export class WarehousesController {
   @ApiOperation({ summary: 'Create a warehouse' })
   @ApiCreatedResponse({ type: WarehouseResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request body' })
-  async create(@Body() dto: CreateWarehouseDto) {
-    const data = await this.warehousesService.create(dto);
+  async create(@Body() dto: CreateWarehouseDto, @Req() req: any) {
+    const data = await this.warehousesService.create({ ...dto, tenantId: req.user.id });
     return successResponse(data);
   }
 

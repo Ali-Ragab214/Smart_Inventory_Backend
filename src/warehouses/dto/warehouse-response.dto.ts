@@ -14,6 +14,12 @@ export class WarehouseResponseDto {
   status!: string;
 
   @ApiProperty()
+  tenantId!: string;
+
+  @ApiProperty()
+  isMain!: boolean;
+
+  @ApiProperty()
   createdAt!: Date;
 
   @ApiProperty()
