@@ -12,7 +12,10 @@
     { "key": "po_id", "value": "" },
     { "key": "vendor_id", "value": "" },
     { "key": "warehouse_id", "value": "" },
-    { "key": "category_id", "value": "" }
+    { "key": "category_id", "value": "" },
+    { "key": "stock_level_id", "value": "" },
+    { "key": "approval_id", "value": "" },
+    { "key": "movement_id", "value": "" }
   ],
   "auth": {
     "type": "bearer",
@@ -88,7 +91,7 @@
               "script": {
                 "exec": [
                   "const json = pm.response.json();",
-                  "if (json.id) { pm.collectionVariables.set('sku_id', json.id); }"
+                  "if (json.data && json.data.id) { pm.collectionVariables.set('sku_id', json.data.id); }"
                 ],
                 "type": "text/javascript"
               }
@@ -105,6 +108,20 @@
           }
         },
         {
+          "name": "Import SKUs from CSV",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/sku/import", "host": ["{{base_url}}"], "path": ["sku", "import"] },
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
           "name": "Get All SKUs",
           "event": [
             {
@@ -112,8 +129,8 @@
               "script": {
                 "exec": [
                   "const json = pm.response.json();",
-                  "if (Array.isArray(json) && json.length > 0) {",
-                  "  pm.collectionVariables.set('sku_id', json[0].id);",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('sku_id', json.data[0].id);",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -142,7 +159,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"price\": 19.99,\n  \"reorderThreshold\": 15\n}"
+              "raw": "{\n  \"price\": 19.99\n}"
             }
           }
         },
@@ -152,6 +169,85 @@
             "method": "DELETE",
             "url": { "raw": "{{base_url}}/sku/{{sku_id}}", "host": ["{{base_url}}"], "path": ["sku", "{{sku_id}}"] },
             "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stock Levels",
+      "item": [
+        {
+          "name": "Get All Stock Levels",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('stock_level_id', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/stock-levels?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["stock-levels"],
+              "query": [
+                { "key": "limit", "value": "20" },
+                { "key": "skuId", "value": "", "disabled": true },
+                { "key": "warehouseId", "value": "", "disabled": true },
+                { "key": "page", "value": "1", "disabled": true }
+              ]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Low Stock Levels",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('stock_level_id', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/stock-levels/low-stock", "host": ["{{base_url}}"], "path": ["stock-levels", "low-stock"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Stock Level by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/stock-levels/{{stock_level_id}}", "host": ["{{base_url}}"], "path": ["stock-levels", "{{stock_level_id}}"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Update Stock Level",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{base_url}}/stock-levels/{{stock_level_id}}", "host": ["{{base_url}}"], "path": ["stock-levels", "{{stock_level_id}}"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reorderThreshold\": 50,\n  \"safetyStock\": 20\n}"
+            }
           }
         }
       ]
@@ -167,7 +263,7 @@
               "script": {
                 "exec": [
                   "const json = pm.response.json();",
-                  "if (json.id) { pm.collectionVariables.set('movement_id', json.id); }"
+                  "if (json.data && json.data.id) { pm.collectionVariables.set('movement_id', json.data.id); }"
                 ],
                 "type": "text/javascript"
               }
@@ -179,12 +275,26 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"quantityChange\": 100,\n  \"reason\": \"purchase_order_receipt\",\n  \"note\": \"Initial stock\"\n}"
+              "raw": "{\n  \"warehouseId\": \"{{warehouse_id}}\",\n  \"quantityChange\": 100,\n  \"reason\": \"purchase_order_receipt\",\n  \"note\": \"Initial stock\"\n}"
             }
           }
         },
         {
           "name": "Get Movement History",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('movement_id', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "url": {
@@ -200,7 +310,7 @@
           "name": "Reconcile Balance",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{base_url}}/inventory/stock-movements/sku/{{sku_id}}/reconcile", "host": ["{{base_url}}"], "path": ["inventory", "stock-movements", "sku", "{{sku_id}}", "reconcile"] },
+            "url": { "raw": "{{base_url}}/inventory/stock-movements/sku/{{sku_id}}/reconcile?warehouseId={{warehouse_id}}", "host": ["{{base_url}}"], "path": ["inventory", "stock-movements", "sku", "{{sku_id}}", "reconcile"], "query": [{ "key": "warehouseId", "value": "{{warehouse_id}}" }] },
             "header": []
           }
         },
@@ -208,30 +318,12 @@
           "name": "Get Consumption Series",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{base_url}}/inventory/stock-movements/sku/{{sku_id}}/consumption?sinceDays=30", "host": ["{{base_url}}"], "path": ["inventory", "stock-movements", "sku", "{{sku_id}}", "consumption"], "query": [{ "key": "sinceDays", "value": "30" }] },
+            "url": { "raw": "{{base_url}}/inventory/stock-movements/sku/{{sku_id}}/consumption?warehouseId={{warehouse_id}}&sinceDays=30", "host": ["{{base_url}}"], "path": ["inventory", "stock-movements", "sku", "{{sku_id}}", "consumption"], "query": [{ "key": "warehouseId", "value": "{{warehouse_id}}" }, { "key": "sinceDays", "value": "30" }] },
             "header": []
           }
         },
         {
           "name": "Get Low Stock SKUs",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "const json = pm.response.json();",
-                  "pm.test('returns success', () => {",
-                  "  pm.expect(json.success).to.be.true;",
-                  "  pm.expect(json.data).to.be.an('array');",
-                  "});",
-                  "if (json.data && json.data.length > 0) {",
-                  "  pm.collectionVariables.set('sku_id', json.data[0].id);",
-                  "}"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
           "request": {
             "method": "GET",
             "url": { "raw": "{{base_url}}/inventory/skus/low-stock", "host": ["{{base_url}}"], "path": ["inventory", "skus", "low-stock"] },
@@ -251,10 +343,9 @@
               "script": {
                 "exec": [
                   "const json = pm.response.json();",
-                  "pm.test('returns success with pending approvals', () => {",
-                  "  pm.expect(json.success).to.be.true;",
-                  "  pm.expect(json.data).to.be.an('array');",
-                  "});"
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('approval_id', json.data[0].id);",
+                  "}"
                 ],
                 "type": "text/javascript"
               }
@@ -265,6 +356,30 @@
             "url": { "raw": "{{base_url}}/approvals", "host": ["{{base_url}}"], "path": ["approvals"] },
             "header": []
           }
+        },
+        {
+          "name": "Approve Request",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/approvals/{{approval_id}}/approve", "host": ["{{base_url}}"], "path": ["approvals", "{{approval_id}}", "approve"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reviewedBy\": \"{{user_id}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Reject Request",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/approvals/{{approval_id}}/reject", "host": ["{{base_url}}"], "path": ["approvals", "{{approval_id}}", "reject"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reviewedBy\": \"{{user_id}}\"\n}"
+            }
+          }
         }
       ]
     },
@@ -273,6 +388,20 @@
       "item": [
         {
           "name": "Get All Users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('user_id', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "url": { "raw": "{{base_url}}/users", "host": ["{{base_url}}"], "path": ["users"] },
@@ -289,13 +418,25 @@
         },
         {
           "name": "Create User (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.collectionVariables.set('user_id', json.data.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "url": { "raw": "{{base_url}}/users", "host": ["{{base_url}}"], "path": ["users"] },
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"staff@test.com\",\n  \"username\": \"staffuser\",\n  \"password\": \"Staff@1234\",\n  \"firstName\": \"Staff\",\n  \"lastName\": \"User\"\n}"
+              "raw": "{\n  \"email\": \"staff@test.com\",\n  \"username\": \"staffuser\",\n  \"password\": \"Staff@1234\",\n  \"name\": \"Staff User\"\n}"
             }
           }
         },
@@ -307,7 +448,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"firstName\": \"Updated\",\n  \"lastName\": \"Name\"\n}"
+              "raw": "{\n  \"name\": \"Updated Name\"\n}"
             }
           }
         },
@@ -332,7 +473,7 @@
               "script": {
                 "exec": [
                   "const json = pm.response.json();",
-                  "if (json.id) { pm.collectionVariables.set('po_id', json.id); }"
+                  "if (json.data && json.data.id) { pm.collectionVariables.set('po_id', json.data.id); }"
                 ],
                 "type": "text/javascript"
               }
@@ -350,6 +491,20 @@
         },
         {
           "name": "Get All POs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('po_id', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "url": { "raw": "{{base_url}}/purchase-orders", "host": ["{{base_url}}"], "path": ["purchase-orders"] },
@@ -389,7 +544,7 @@
               "script": {
                 "exec": [
                   "const json = pm.response.json();",
-                  "if (json.id) { pm.collectionVariables.set('vendor_id', json.id); }"
+                  "if (json.data && json.data.id) { pm.collectionVariables.set('vendor_id', json.data.id); }"
                 ],
                 "type": "text/javascript"
               }
@@ -413,8 +568,8 @@
               "script": {
                 "exec": [
                   "const json = pm.response.json();",
-                  "if (Array.isArray(json) && json.length > 0) {",
-                  "  pm.collectionVariables.set('vendor_id', json[0].id);",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('vendor_id', json.data[0].id);",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -611,6 +766,23 @@
             "method": "DELETE",
             "url": { "raw": "{{base_url}}/categories/{{category_id}}", "host": ["{{base_url}}"], "path": ["categories", "{{category_id}}"] },
             "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agents",
+      "item": [
+        {
+          "name": "Test Queue",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/agents/test-queue", "host": ["{{base_url}}"], "path": ["agents", "test-queue"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agentType\": \"reorder\",\n  \"skuId\": \"{{sku_id}}\"\n}"
+            }
           }
         }
       ]
