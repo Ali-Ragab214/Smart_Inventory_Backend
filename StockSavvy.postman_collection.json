@@ -1,0 +1,619 @@
+{
+  "info": {
+    "name": "StockSavvy API",
+    "description": "AI-Powered Inventory Management Platform",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000" },
+    { "key": "token", "value": "" },
+    { "key": "sku_id", "value": "" },
+    { "key": "user_id", "value": "" },
+    { "key": "po_id", "value": "" },
+    { "key": "vendor_id", "value": "" },
+    { "key": "warehouse_id", "value": "" },
+    { "key": "category_id", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?.access_token) {",
+                  "  pm.collectionVariables.set('token', json.data.access_token);",
+                  "  if (json.data.user?.warehouseId) pm.collectionVariables.set('warehouse_id', json.data.user.warehouseId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/auth/register", "host": ["{{base_url}}"], "path": ["auth", "register"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"tenant@test.com\",\n  \"username\": \"tenant\",\n  \"password\": \"Tenant@1234\",\n  \"name\": \"Tenant Owner\",\n  \"warehouseName\": \"Main Warehouse\",\n  \"warehouseLocation\": \"Cairo, Egypt\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data?.access_token) {",
+                  "  pm.collectionVariables.set('token', json.data.access_token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emailOrUsername\": \"test@test.com\",\n  \"password\": \"Test@1234\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "SKU",
+      "item": [
+        {
+          "name": "Create SKU",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.id) { pm.collectionVariables.set('sku_id', json.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/sku", "host": ["{{base_url}}"], "path": ["sku"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"NEW-SKU-001\",\n  \"name\": \"New Product\",\n  \"categoryId\": \"{{category_id}}\",\n  \"cost\": 10.00,\n  \"price\": 24.99\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All SKUs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json) && json.length > 0) {",
+                  "  pm.collectionVariables.set('sku_id', json[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/sku", "host": ["{{base_url}}"], "path": ["sku"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get SKU by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/sku/{{sku_id}}", "host": ["{{base_url}}"], "path": ["sku", "{{sku_id}}"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Update SKU",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{base_url}}/sku/{{sku_id}}", "host": ["{{base_url}}"], "path": ["sku", "{{sku_id}}"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 19.99,\n  \"reorderThreshold\": 15\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete SKU",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/sku/{{sku_id}}", "host": ["{{base_url}}"], "path": ["sku", "{{sku_id}}"] },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inventory / Stock Movements",
+      "item": [
+        {
+          "name": "Record Movement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.id) { pm.collectionVariables.set('movement_id', json.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/inventory/skus/{{sku_id}}/movements", "host": ["{{base_url}}"], "path": ["inventory", "skus", "{{sku_id}}", "movements"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantityChange\": 100,\n  \"reason\": \"purchase_order_receipt\",\n  \"note\": \"Initial stock\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Movement History",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/inventory/stock-movements/sku/{{sku_id}}?limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["inventory", "stock-movements", "sku", "{{sku_id}}"],
+              "query": [{ "key": "limit", "value": "50" }, { "key": "from", "value": "", "disabled": true }, { "key": "to", "value": "", "disabled": true }, { "key": "reason", "value": "", "disabled": true }]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "Reconcile Balance",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/inventory/stock-movements/sku/{{sku_id}}/reconcile", "host": ["{{base_url}}"], "path": ["inventory", "stock-movements", "sku", "{{sku_id}}", "reconcile"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Consumption Series",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/inventory/stock-movements/sku/{{sku_id}}/consumption?sinceDays=30", "host": ["{{base_url}}"], "path": ["inventory", "stock-movements", "sku", "{{sku_id}}", "consumption"], "query": [{ "key": "sinceDays", "value": "30" }] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Low Stock SKUs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('returns success', () => {",
+                  "  pm.expect(json.success).to.be.true;",
+                  "  pm.expect(json.data).to.be.an('array');",
+                  "});",
+                  "if (json.data && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('sku_id', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/inventory/skus/low-stock", "host": ["{{base_url}}"], "path": ["inventory", "skus", "low-stock"] },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Approvals",
+      "item": [
+        {
+          "name": "Get Pending Approvals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test('returns success with pending approvals', () => {",
+                  "  pm.expect(json.success).to.be.true;",
+                  "  pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/approvals", "host": ["{{base_url}}"], "path": ["approvals"] },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get All Users",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/users", "host": ["{{base_url}}"], "path": ["users"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get User by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/users/{{user_id}}", "host": ["{{base_url}}"], "path": ["users", "{{user_id}}"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Create User (Admin)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/users", "host": ["{{base_url}}"], "path": ["users"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff@test.com\",\n  \"username\": \"staffuser\",\n  \"password\": \"Staff@1234\",\n  \"firstName\": \"Staff\",\n  \"lastName\": \"User\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{base_url}}/users/{{user_id}}", "host": ["{{base_url}}"], "path": ["users", "{{user_id}}"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Updated\",\n  \"lastName\": \"Name\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/users/{{user_id}}", "host": ["{{base_url}}"], "path": ["users", "{{user_id}}"] },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Purchase Orders",
+      "item": [
+        {
+          "name": "Create PO",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.id) { pm.collectionVariables.set('po_id', json.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/purchase-orders", "host": ["{{base_url}}"], "path": ["purchase-orders"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vendorId\": \"{{vendor_id}}\",\n  \"warehouseId\": \"{{warehouse_id}}\",\n  \"lineItems\": [\n    { \"skuId\": \"{{sku_id}}\", \"quantity\": 50, \"unitPrice\": 12.50 }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All POs",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/purchase-orders", "host": ["{{base_url}}"], "path": ["purchase-orders"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get PO by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/purchase-orders/{{po_id}}", "host": ["{{base_url}}"], "path": ["purchase-orders", "{{po_id}}"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Transition PO Status",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/purchase-orders/{{po_id}}/transition", "host": ["{{base_url}}"], "path": ["purchase-orders", "{{po_id}}", "transition"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"pending_approval\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Vendors",
+      "item": [
+        {
+          "name": "Create Vendor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.id) { pm.collectionVariables.set('vendor_id', json.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/vendors", "host": ["{{base_url}}"], "path": ["vendors"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Acme Supplies\",\n  \"contactEmail\": \"sales@acme.com\",\n  \"contactPhone\": \"+20 100 000 0000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All Vendors",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (Array.isArray(json) && json.length > 0) {",
+                  "  pm.collectionVariables.set('vendor_id', json[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/vendors", "host": ["{{base_url}}"], "path": ["vendors"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Vendor by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/vendors/{{vendor_id}}", "host": ["{{base_url}}"], "path": ["vendors", "{{vendor_id}}"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Update Vendor",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{base_url}}/vendors/{{vendor_id}}", "host": ["{{base_url}}"], "path": ["vendors", "{{vendor_id}}"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Acme Supplies Updated\",\n  \"contactPhone\": \"+20 100 111 1111\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Vendor",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/vendors/{{vendor_id}}", "host": ["{{base_url}}"], "path": ["vendors", "{{vendor_id}}"] },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Warehouses",
+      "item": [
+        {
+          "name": "Create Warehouse",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.collectionVariables.set('warehouse_id', json.data.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/warehouses", "host": ["{{base_url}}"], "path": ["warehouses"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Main Warehouse\",\n  \"location\": \"Cairo, Egypt\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All Warehouses",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('warehouse_id', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/warehouses", "host": ["{{base_url}}"], "path": ["warehouses"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Warehouse by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/warehouses/{{warehouse_id}}", "host": ["{{base_url}}"], "path": ["warehouses", "{{warehouse_id}}"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Update Warehouse",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{base_url}}/warehouses/{{warehouse_id}}", "host": ["{{base_url}}"], "path": ["warehouses", "{{warehouse_id}}"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Main Warehouse Updated\",\n  \"location\": \"Alexandria, Egypt\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Warehouse",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/warehouses/{{warehouse_id}}", "host": ["{{base_url}}"], "path": ["warehouses", "{{warehouse_id}}"] },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "Create Category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.collectionVariables.set('category_id', json.data.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/categories", "host": ["{{base_url}}"], "path": ["categories"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Electronics\",\n  \"description\": \"Electronic devices and accessories\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All Categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('category_id', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/categories", "host": ["{{base_url}}"], "path": ["categories"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Category by ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/categories/{{category_id}}", "host": ["{{base_url}}"], "path": ["categories", "{{category_id}}"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Update Category",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "{{base_url}}/categories/{{category_id}}", "host": ["{{base_url}}"], "path": ["categories", "{{category_id}}"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Electronics Updated\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Category",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/categories/{{category_id}}", "host": ["{{base_url}}"], "path": ["categories", "{{category_id}}"] },
+            "header": []
+          }
+        }
+      ]
+    }
+  ]
+}
