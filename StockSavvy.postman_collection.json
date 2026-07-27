@@ -174,7 +174,7 @@
       ]
     },
     {
-      "name": "Stock Levels",
+      "name": "Warehouse Stock Levels",
       "item": [
         {
           "name": "Get All Stock Levels",
@@ -195,13 +195,12 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{base_url}}/stock-levels?limit=20",
+              "raw": "{{base_url}}/warehouses/{{warehouse_id}}/stock-levels?limit=20",
               "host": ["{{base_url}}"],
-              "path": ["stock-levels"],
+              "path": ["warehouses", "{{warehouse_id}}", "stock-levels"],
               "query": [
                 { "key": "limit", "value": "20" },
                 { "key": "skuId", "value": "", "disabled": true },
-                { "key": "warehouseId", "value": "", "disabled": true },
                 { "key": "page", "value": "1", "disabled": true }
               ]
             },
@@ -226,7 +225,7 @@
           ],
           "request": {
             "method": "GET",
-            "url": { "raw": "{{base_url}}/stock-levels/low-stock", "host": ["{{base_url}}"], "path": ["stock-levels", "low-stock"] },
+            "url": { "raw": "{{base_url}}/warehouses/{{warehouse_id}}/stock-levels/low-stock", "host": ["{{base_url}}"], "path": ["warehouses", "{{warehouse_id}}", "stock-levels", "low-stock"] },
             "header": []
           }
         },
@@ -234,7 +233,7 @@
           "name": "Get Stock Level by ID",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{base_url}}/stock-levels/{{stock_level_id}}", "host": ["{{base_url}}"], "path": ["stock-levels", "{{stock_level_id}}"] },
+            "url": { "raw": "{{base_url}}/warehouses/{{warehouse_id}}/stock-levels/{{stock_level_id}}", "host": ["{{base_url}}"], "path": ["warehouses", "{{warehouse_id}}", "stock-levels", "{{stock_level_id}}"] },
             "header": []
           }
         },
@@ -242,18 +241,26 @@
           "name": "Update Stock Level",
           "request": {
             "method": "PATCH",
-            "url": { "raw": "{{base_url}}/stock-levels/{{stock_level_id}}", "host": ["{{base_url}}"], "path": ["stock-levels", "{{stock_level_id}}"] },
+            "url": { "raw": "{{base_url}}/warehouses/{{warehouse_id}}/stock-levels/{{stock_level_id}}", "host": ["{{base_url}}"], "path": ["warehouses", "{{warehouse_id}}", "stock-levels", "{{stock_level_id}}"] },
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"reorderThreshold\": 50,\n  \"safetyStock\": 20\n}"
             }
           }
+        },
+        {
+          "name": "Initialize Stock Levels",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/warehouses/{{warehouse_id}}/stock-levels/initialize", "host": ["{{base_url}}"], "path": ["warehouses", "{{warehouse_id}}", "stock-levels", "initialize"] },
+            "header": []
+          }
         }
       ]
     },
     {
-      "name": "Inventory / Stock Movements",
+      "name": "Stock Movements",
       "item": [
         {
           "name": "Record Movement",
@@ -271,11 +278,23 @@
           ],
           "request": {
             "method": "POST",
-            "url": { "raw": "{{base_url}}/inventory/skus/{{sku_id}}/movements", "host": ["{{base_url}}"], "path": ["inventory", "skus", "{{sku_id}}", "movements"] },
+            "url": { "raw": "{{base_url}}/inventory/stock-movements", "host": ["{{base_url}}"], "path": ["inventory", "stock-movements"] },
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"warehouseId\": \"{{warehouse_id}}\",\n  \"quantityChange\": 100,\n  \"reason\": \"purchase_order_receipt\",\n  \"note\": \"Initial stock\"\n}"
+              "raw": "{\n  \"skuId\": \"{{sku_id}}\",\n  \"warehouseId\": \"{{warehouse_id}}\",\n  \"quantityChange\": 100,\n  \"reason\": \"purchase_order_receipt\",\n  \"note\": \"Initial stock\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Transfer Stock",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/inventory/stock-movements/transfer", "host": ["{{base_url}}"], "path": ["inventory", "stock-movements", "transfer"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"skuId\": \"{{sku_id}}\",\n  \"fromWarehouseId\": \"{{warehouse_id}}\",\n  \"toWarehouseId\": \"REPLACE_WITH_DEST_WAREHOUSE_ID\",\n  \"quantity\": 30,\n  \"note\": \"Transfer between warehouses\"\n}"
             }
           }
         },
@@ -319,14 +338,6 @@
           "request": {
             "method": "GET",
             "url": { "raw": "{{base_url}}/inventory/stock-movements/sku/{{sku_id}}/consumption?warehouseId={{warehouse_id}}&sinceDays=30", "host": ["{{base_url}}"], "path": ["inventory", "stock-movements", "sku", "{{sku_id}}", "consumption"], "query": [{ "key": "warehouseId", "value": "{{warehouse_id}}" }, { "key": "sinceDays", "value": "30" }] },
-            "header": []
-          }
-        },
-        {
-          "name": "Get Low Stock SKUs",
-          "request": {
-            "method": "GET",
-            "url": { "raw": "{{base_url}}/inventory/skus/low-stock", "host": ["{{base_url}}"], "path": ["inventory", "skus", "low-stock"] },
             "header": []
           }
         }

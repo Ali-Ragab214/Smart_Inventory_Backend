@@ -27,7 +27,7 @@ export class Warehouse extends AbstractEntity {
   tenant!: User;
 
   @Index('idx_warehouses_tenant')
-  @Column({ name: 'tenant_id', type: 'uuid' })
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
   tenantId!: string;
 
   @Column({ name: 'is_main', type: 'boolean', default: false })
