@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import { User, UserRole } from './entities/user.entity';
 import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -47,19 +47,24 @@ export class UsersService {
       throw new ConflictException('Username already in use');
     }
 
+    const user = this.userMapper.toEntity(createUserDto);
+    let saved = await this.userRepository.save(user);
+
     // Auto-create warehouse for tenant_owner registration
-    if (!createUserDto.warehouseId && createUserDto.warehouseName) {
+    if (!createUserDto.warehouseId && createUserDto.warehouseName && saved.role === UserRole.TENANT_OWNER) {
       const warehouse = this.warehouseRepository.create({
         name: createUserDto.warehouseName,
         location: createUserDto.warehouseLocation ?? null,
+        tenantId: saved.id,
+        isMain: true,
       });
       const savedWarehouse = await this.warehouseRepository.save(warehouse);
-      createUserDto.warehouseId = savedWarehouse.id;
+      
+      saved.warehouseId = savedWarehouse.id;
+      saved = await this.userRepository.save(saved);
       this.logger.log(`Warehouse created for new tenant: ${savedWarehouse.id}`);
     }
 
-    const user = this.userMapper.toEntity(createUserDto);
-    const saved = await this.userRepository.save(user);
     this.logger.log(`User created: ${saved.id}`);
     return this.userMapper.toResponse(saved);
   }

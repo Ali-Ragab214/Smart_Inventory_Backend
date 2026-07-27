@@ -11,6 +11,9 @@ export class WarehouseMapper {
     warehouse.name = dto.name;
     warehouse.location = dto.location ?? null;
     warehouse.status = dto.status ?? undefined as any;
+    if (dto.tenantId) {
+      warehouse.tenantId = dto.tenantId;
+    }
     return warehouse;
   }
 
@@ -20,6 +23,8 @@ export class WarehouseMapper {
     dto.name = entity.name;
     dto.location = entity.location ?? null;
     dto.status = entity.status;
+    dto.tenantId = entity.tenantId;
+    dto.isMain = entity.isMain;
     dto.createdAt = entity.createdAt;
     dto.updatedAt = entity.updatedAt;
     return dto;
