@@ -209,6 +209,117 @@ export class StockMovementService {
     };
   }
 
+  //  Transfer between warehouses
+
+  async transfer(params: {
+    skuId: string;
+    fromWarehouseId: string;
+    toWarehouseId: string;
+    quantity: number;
+    idempotencyKey: string;
+    performedByUserId?: string;
+    note?: string;
+  }): Promise<{ out: StockMovementResponseDto; in: StockMovementResponseDto }> {
+    if (params.fromWarehouseId === params.toWarehouseId) {
+      throw new BadRequestException('Source and destination warehouses must be different');
+    }
+    if (params.quantity <= 0) {
+      throw new BadRequestException('Transfer quantity must be positive');
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const movRepo = manager.getRepository(StockMovement);
+      const slRepo = manager.getRepository(StockLevel);
+
+      const existing = await movRepo.findOne({
+        where: { idempotencyKey: params.idempotencyKey },
+      });
+      if (existing) {
+        const partnerKey = `${params.idempotencyKey}-partner`;
+        const partner = await movRepo.findOne({
+          where: { idempotencyKey: partnerKey },
+        });
+        const out = this.mapper.toResponse(existing);
+        const inbound = partner ? this.mapper.toResponse(partner) : null as any;
+        return { out, in: inbound };
+      }
+
+      const outKey = params.idempotencyKey;
+      const inKey = `${params.idempotencyKey}-partner`;
+
+      // Lock both stock levels
+      let sourceSl = await slRepo.findOne({
+        where: { skuId: params.skuId, warehouseId: params.fromWarehouseId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!sourceSl) {
+        throw new NotFoundException(
+          `No stock level for SKU "${params.skuId}" in source warehouse "${params.fromWarehouseId}"`,
+        );
+      }
+
+      let destSl = await slRepo.findOne({
+        where: { skuId: params.skuId, warehouseId: params.toWarehouseId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!destSl) {
+        destSl = slRepo.create({
+          skuId: params.skuId,
+          warehouseId: params.toWarehouseId,
+          quantity: 0,
+          reorderThreshold: 0,
+          safetyStock: 0,
+        });
+        destSl = await slRepo.save(destSl);
+      }
+
+      const newSourceBalance = sourceSl.quantity - params.quantity;
+      if (newSourceBalance < 0) {
+        throw new BadRequestException(
+          `Insufficient stock in source warehouse (available: ${sourceSl.quantity}, transfer: ${params.quantity})`,
+        );
+      }
+      const newDestBalance = destSl.quantity + params.quantity;
+
+      // OUT movement
+      const outMovement = movRepo.create({
+        skuId: params.skuId,
+        warehouseId: params.fromWarehouseId,
+        reason: MovementReason.TRANSFER_OUT,
+        quantityChange: -params.quantity,
+        balanceAfter: newSourceBalance,
+        idempotencyKey: outKey,
+        performedByUserId: params.performedByUserId ?? null,
+        note: params.note ?? null,
+      });
+      const savedOut = await movRepo.save(outMovement);
+
+      // IN movement
+      const inMovement = movRepo.create({
+        skuId: params.skuId,
+        warehouseId: params.toWarehouseId,
+        reason: MovementReason.TRANSFER_IN,
+        quantityChange: params.quantity,
+        balanceAfter: newDestBalance,
+        idempotencyKey: inKey,
+        performedByUserId: params.performedByUserId ?? null,
+        note: params.note ?? null,
+      });
+      const savedIn = await movRepo.save(inMovement);
+
+      // Update stock levels
+      sourceSl.quantity = newSourceBalance;
+      await slRepo.save(sourceSl);
+      destSl.quantity = newDestBalance;
+      await slRepo.save(destSl);
+
+      return {
+        out: this.mapper.toResponse(savedOut),
+        in: this.mapper.toResponse(savedIn),
+      };
+    });
+  }
+
   //  Demand-forecasting data feed
 
   /**

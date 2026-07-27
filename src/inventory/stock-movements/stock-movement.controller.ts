@@ -1,23 +1,78 @@
+import { randomUUID } from 'node:crypto';
 import {
+  Body,
   Controller,
   DefaultValuePipe,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseIntPipe,
   ParseUUIDPipe,
+  Post,
   Query,
 } from '@nestjs/common';
 import {
   StockMovementService,
-  ReconciliationResult,
-  DailyConsumptionRow,
 } from './stock-movement.service';
 import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
+import { RecordMovementDto } from './dto/record-movement.dto';
+import { TransferStockDto } from './dto/transfer-stock.dto';
+import { StockMovementResponseDto } from './dto/stock-movement-response.dto';
 import { successResponse, paginatedResponse } from '../../utils/response.util';
+import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Stock Movements')
+@ApiBearerAuth()
 @Controller('inventory/stock-movements')
 export class StockMovementController {
   constructor(private readonly stockMovementService: StockMovementService) {}
+
+  /**
+   * POST /inventory/stock-movements
+   *
+   * Record a stock movement with full idempotency support.
+   */
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Record a stock movement' })
+  @ApiCreatedResponse({ type: StockMovementResponseDto })
+  async recordMovement(@Body() dto: RecordMovementDto) {
+    const data = await this.stockMovementService.recordMovement({
+      skuId: dto.skuId,
+      warehouseId: dto.warehouseId,
+      reason: dto.reason,
+      quantityChange: dto.quantityChange,
+      idempotencyKey: dto.idempotencyKey ?? randomUUID(),
+      performedByUserId: dto.performedByUserId,
+      note: dto.note,
+      referenceType: dto.referenceType,
+      referenceId: dto.referenceId,
+    });
+    return successResponse(data);
+  }
+
+  /**
+   * POST /inventory/stock-movements/transfer
+   *
+   * Atomically transfer stock from one warehouse to another.
+   * Records both a TRANSFER_OUT (source) and TRANSFER_IN (destination) movement.
+   */
+  @Post('transfer')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Transfer stock between warehouses' })
+  async transfer(@Body() dto: TransferStockDto) {
+    const data = await this.stockMovementService.transfer({
+      skuId: dto.skuId,
+      fromWarehouseId: dto.fromWarehouseId,
+      toWarehouseId: dto.toWarehouseId,
+      quantity: dto.quantity,
+      idempotencyKey: dto.idempotencyKey ?? randomUUID(),
+      performedByUserId: dto.performedByUserId,
+      note: dto.note,
+    });
+    return successResponse(data);
+  }
 
   /**
    * GET /inventory/stock-movements/sku/:skuId
