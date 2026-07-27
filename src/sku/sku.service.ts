@@ -11,6 +11,7 @@ import { SkuQueryDto } from './dto/sku-query.dto';
 import { CsvImportResponseDto, CsvImportErrorDto } from './dto/csv-import-response.dto';
 import { paginate } from '../utils/pagination.util';
 import { applySortAndSearch } from '../utils/query.util';
+import { StockLevelsService } from '../inventory/stock-levels/stock-levels.service';
 
 @Injectable()
 export class SkuService {
@@ -19,6 +20,7 @@ export class SkuService {
     private readonly skuRepository: Repository<Sku>,
     private readonly skuMapper: SkuMapper,
     private readonly dataSource: DataSource,
+    private readonly stockLevelsService: StockLevelsService,
   ) {}
 
   async create(createSkuDto: CreateSkuDto): Promise<SkuResponseDto> {
@@ -32,6 +34,7 @@ export class SkuService {
     }
     const skuEntity = this.skuMapper.toEntity(createSkuDto);
     const savedEntity = await this.skuRepository.save(skuEntity);
+    await this.stockLevelsService.autoInitializeForSku(savedEntity.id);
     return this.skuMapper.toResponse(savedEntity);
   }
 
@@ -185,12 +188,19 @@ export class SkuService {
 
     // Batch insert valid SKUs
     let successful = 0;
+    const createdIds: string[] = [];
     if (toCreate.length > 0) {
       await this.dataSource.transaction(async (manager) => {
         const entities = toCreate.map((dto) => this.skuMapper.toEntity(dto));
-        await manager.save(Sku, entities);
+        const saved = await manager.save(Sku, entities);
         successful = entities.length;
+        createdIds.push(...saved.map((s) => s.id));
       });
+    }
+
+    // Auto-initialize stock levels for all newly created SKUs
+    if (createdIds.length > 0) {
+      await this.stockLevelsService.autoInitializeForSkus(createdIds);
     }
 
     return {
