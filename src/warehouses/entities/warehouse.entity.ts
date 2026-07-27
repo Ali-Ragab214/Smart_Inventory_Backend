@@ -1,5 +1,6 @@
-import { Column, Entity } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
 import { AbstractEntity } from '../../shared/base.entity';
+import { User } from '../../users/entities/user.entity';
 
 export enum WarehouseStatus {
   ACTIVE = 'active',
@@ -20,4 +21,15 @@ export class Warehouse extends AbstractEntity {
     default: WarehouseStatus.ACTIVE,
   })
   status!: WarehouseStatus;
+
+  @ManyToOne(() => User, (user) => user.ownedWarehouses, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tenant_id' })
+  tenant!: User;
+
+  @Index('idx_warehouses_tenant')
+  @Column({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string;
+
+  @Column({ name: 'is_main', type: 'boolean', default: false })
+  isMain!: boolean;
 }

@@ -11,21 +11,7 @@ import { User } from '../../../users/entities/user.entity';
 import { Warehouse } from '../../../warehouses/entities/warehouse.entity';
 import { MovementReason } from '../enums/movement-reason.enum';
 
-/**
- * APPEND-ONLY LEDGER — never UPDATE or DELETE rows in this table.
- *
- * Each row records a single atomic stock change for one SKU in one warehouse.
- * `balanceAfter` is a denormalized snapshot captured at insert time
- * so that history is fully self-contained for audit purposes.
- *
- * Concurrency: callers MUST hold a pessimistic write-lock on the
- * parent StockLevel row (inside a transaction) before inserting here, to
- * prevent double-counting on concurrent requests.
- *
- * Idempotency: `idempotencyKey` carries a UNIQUE constraint so that
- * any retry (from a job queue, agent, etc.) that re-submits the same
- * logical operation is safely deduplicated.
- */
+
 @Entity('stock_movements')
 @Index('idx_stock_movements_sku_created', ['skuId', 'createdAt'])
 @Index('idx_stock_movements_created', ['createdAt'])

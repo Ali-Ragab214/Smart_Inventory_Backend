@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -30,4 +31,8 @@ export class CreateWarehouseDto {
   @IsEnum(WarehouseStatus)
   @IsOptional()
   status?: WarehouseStatus;
+
+  @IsUUID()
+  @IsOptional()
+  tenantId?: string;
 }
