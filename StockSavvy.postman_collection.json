@@ -880,6 +880,102 @@
               "raw": "{\n  \"agentType\": \"reorder\",\n  \"skuId\": \"{{sku_id}}\"\n}"
             }
           }
+        },
+        {
+          "name": "Test Tool - get_sku",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/agents/test-tool", "host": ["{{base_url}}"], "path": ["agents", "test-tool"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toolName\": \"get_sku\",\n  \"input\": {\n    \"skuId\": \"{{sku_id}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Test Tool - get_low_stock_skus",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/agents/test-tool", "host": ["{{base_url}}"], "path": ["agents", "test-tool"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toolName\": \"get_low_stock_skus\",\n  \"input\": {}\n}"
+            }
+          }
+        },
+        {
+          "name": "Test Tool - get_movement_history",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/agents/test-tool", "host": ["{{base_url}}"], "path": ["agents", "test-tool"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toolName\": \"get_movement_history\",\n  \"input\": {\n    \"skuId\": \"{{sku_id}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Test Tool - get_vendor",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/agents/test-tool", "host": ["{{base_url}}"], "path": ["agents", "test-tool"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toolName\": \"get_vendor\",\n  \"input\": {\n    \"vendorId\": \"{{vendor_id}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Test Tool - get_vendors_for_sku",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/agents/test-tool", "host": ["{{base_url}}"], "path": ["agents", "test-tool"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toolName\": \"get_vendors_for_sku\",\n  \"input\": {\n    \"skuId\": \"{{sku_id}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Test Tool - get_vendor_catalog_entry",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/agents/test-tool", "host": ["{{base_url}}"], "path": ["agents", "test-tool"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toolName\": \"get_vendor_catalog_entry\",\n  \"input\": {\n    \"vendorId\": \"{{vendor_id}}\",\n    \"skuId\": \"{{sku_id}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Test Tool - get_all_vendors",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/agents/test-tool", "host": ["{{base_url}}"], "path": ["agents", "test-tool"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toolName\": \"get_all_vendors\",\n  \"input\": {}\n}"
+            }
+          }
+        },
+        {
+          "name": "Test Tool - unknown (should 400)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/agents/test-tool", "host": ["{{base_url}}"], "path": ["agents", "test-tool"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toolName\": \"fake_tool\",\n  \"input\": {}\n}"
+            }
+          }
         }
       ]
     }
