@@ -15,7 +15,8 @@
     { "key": "category_id", "value": "" },
     { "key": "stock_level_id", "value": "" },
     { "key": "approval_id", "value": "" },
-    { "key": "movement_id", "value": "" }
+    { "key": "movement_id", "value": "" },
+    { "key": "anomaly_id", "value": "" }
   ],
   "auth": {
     "type": "bearer",
@@ -776,6 +777,90 @@
           "request": {
             "method": "DELETE",
             "url": { "raw": "{{base_url}}/categories/{{category_id}}", "host": ["{{base_url}}"], "path": ["categories", "{{category_id}}"] },
+            "header": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "Anomaly Flags",
+      "item": [
+        {
+          "name": "Create Flag",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && json.data.id) { pm.collectionVariables.set('anomaly_id', json.data.id); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/anomalies", "host": ["{{base_url}}"], "path": ["anomalies"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"skuId\": \"{{sku_id}}\",\n  \"description\": \"Unexplained stock drop\",\n  \"relatedMovementIds\": []\n}"
+            }
+          }
+        },
+        {
+          "name": "Get All Flags",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.data && Array.isArray(json.data) && json.data.length > 0) {",
+                  "  pm.collectionVariables.set('anomaly_id', json.data[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/anomalies", "host": ["{{base_url}}"], "path": ["anomalies"] },
+            "header": []
+          }
+        },
+        {
+          "name": "Get Flags by Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/anomalies?status=flagged",
+              "host": ["{{base_url}}"],
+              "path": ["anomalies"],
+              "query": [{ "key": "status", "value": "flagged" }]
+            },
+            "header": []
+          }
+        },
+        {
+          "name": "Review Flag",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/anomalies/{{anomaly_id}}/review", "host": ["{{base_url}}"], "path": ["anomalies", "{{anomaly_id}}", "review"] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reviewedBy\": \"{{user_id}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Escalate Flag",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/anomalies/{{anomaly_id}}/escalate", "host": ["{{base_url}}"], "path": ["anomalies", "{{anomaly_id}}", "escalate"] },
             "header": []
           }
         }
