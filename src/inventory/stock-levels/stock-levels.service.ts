@@ -40,6 +40,18 @@ export class StockLevelsService {
     return { data: result.data.map((sl) => this.toResponse(sl)), total: result.total };
   }
 
+  async findLowStock(): Promise<StockLevelResponseDto[]> {
+    const levels = await this.stockLevelRepo
+      .createQueryBuilder('sl')
+      .leftJoinAndSelect('sl.sku', 'sku')
+      .leftJoinAndSelect('sl.warehouse', 'warehouse')
+      .where('sl.quantity <= sl.reorderThreshold')
+      .orderBy('sl.quantity', 'ASC')
+      .getMany();
+
+    return levels.map((sl) => this.toResponse(sl));
+  }
+
   async findLowStockByWarehouse(warehouseId: string): Promise<StockLevelResponseDto[]> {
     const levels = await this.stockLevelRepo
       .createQueryBuilder('sl')
