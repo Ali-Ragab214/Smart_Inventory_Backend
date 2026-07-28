@@ -13,7 +13,7 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { TransitionDto } from './dto/transition.dto';
 import { PurchaseOrderResponseDto } from './dto/purchase-order-response.dto';
-import { PaginationQueryDto } from '../utils/query.dto';
+import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { successResponse, paginatedResponse } from '../utils/response.util';
 
 @Controller('purchase-orders')
@@ -27,7 +27,7 @@ export class PurchaseOrdersController {
   }
 
   @Get()
-  async findAll(@Query() query: PaginationQueryDto) {
+  async findAll(@Query() query: PurchaseOrderQueryDto) {
     const { data, total } = await this.service.findAll(query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }

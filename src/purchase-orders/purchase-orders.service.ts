@@ -6,7 +6,7 @@ import { PurchaseOrderLineItem } from './entities/purchase-order-line-item.entit
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { PurchaseOrderResponseDto } from './dto/purchase-order-response.dto';
 import { PurchaseOrderMapper } from './mappers/purchase-order.mapper';
-import { PaginationQueryDto } from '../utils/query.dto';
+import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { paginate } from '../utils/pagination.util';
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
@@ -36,11 +36,20 @@ export class PurchaseOrdersService {
     return this.mapper.toResponse(loaded!);
   }
 
-  async findAll(query: PaginationQueryDto): Promise<{ data: PurchaseOrderResponseDto[]; total: number }> {
+  async findAll(query: PurchaseOrderQueryDto): Promise<{ data: PurchaseOrderResponseDto[]; total: number }> {
     const qb = this.poRepository
       .createQueryBuilder('po')
       .leftJoinAndSelect('po.lineItems', 'lineItems')
       .orderBy('po.createdAt', 'DESC');
+
+    if (query.status) {
+      qb.andWhere('po.status = :status', { status: query.status });
+    }
+
+    if (query.warehouseId) {
+      qb.andWhere('po.warehouseId = :warehouseId', { warehouseId: query.warehouseId });
+    }
+
     const result = await paginate(qb, query.page!, query.limit!);
     return { data: this.mapper.toResponseList(result.data), total: result.total };
   }
