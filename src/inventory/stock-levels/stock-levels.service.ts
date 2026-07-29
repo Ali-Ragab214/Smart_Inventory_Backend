@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { StockLevel } from './entities/stock-level.entity';
 import { Sku } from '../../sku/entities/sku.entity';
 import { Warehouse } from '../../warehouses/entities/warehouse.entity';
+import { User, UserRole } from '../../users/entities/user.entity';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
 import { UpdateStockLevelDto } from './dto/update-stock-level.dto';
 import { StockLevelResponseDto } from './dto/stock-level-response.dto';
@@ -62,6 +63,34 @@ export class StockLevelsService {
       .orderBy('sl.quantity', 'ASC')
       .getMany();
 
+    return levels.map((sl) => this.toResponse(sl));
+  }
+
+  async findLowStockForUser(user: User): Promise<StockLevelResponseDto[]> {
+    const qb = this.stockLevelRepo
+      .createQueryBuilder('sl')
+      .leftJoinAndSelect('sl.sku', 'sku')
+      .leftJoinAndSelect('sl.warehouse', 'warehouse')
+      .where('sl.quantity <= sl.reorderThreshold')
+      .orderBy('sl.quantity', 'ASC');
+
+    if (user.role === UserRole.TENANT_OWNER) {
+      qb.andWhere('warehouse.tenantId = :userId', { userId: user.id });
+    } else if (
+      user.role === UserRole.WAREHOUSE_MANAGER ||
+      user.role === UserRole.INVENTORY_CLERK
+    ) {
+      if (!user.warehouseId) {
+        return [];
+      }
+      qb.andWhere('sl.warehouseId = :warehouseId', { warehouseId: user.warehouseId });
+    } else if (user.role === UserRole.SUPER_ADMIN) {
+      // Super admin can see all low stock
+    } else {
+      throw new ForbiddenException('You do not have permission to view low stock data');
+    }
+
+    const levels = await qb.getMany();
     return levels.map((sl) => this.toResponse(sl));
   }
 

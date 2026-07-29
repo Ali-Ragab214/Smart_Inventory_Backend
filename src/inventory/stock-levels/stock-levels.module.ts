@@ -5,10 +5,11 @@ import { Sku } from '../../sku/entities/sku.entity';
 import { Warehouse } from '../../warehouses/entities/warehouse.entity';
 import { StockLevelsService } from './stock-levels.service';
 import { WarehouseStockLevelsController } from './warehouse-stock-levels.controller';
+import { StockLevelsController } from './stock-levels.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([StockLevel, Sku, Warehouse])],
-  controllers: [WarehouseStockLevelsController],
+  controllers: [WarehouseStockLevelsController, StockLevelsController],
   providers: [StockLevelsService],
   exports: [StockLevelsService],
 })
