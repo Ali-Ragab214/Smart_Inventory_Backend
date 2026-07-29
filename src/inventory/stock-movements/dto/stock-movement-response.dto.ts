@@ -5,6 +5,10 @@ export class StockMovementResponseDto {
 
   skuId!: string;
 
+  skuCode!: string | null;
+
+  skuName!: string | null;
+
   warehouseId!: string;
 
   reason!: MovementReason;

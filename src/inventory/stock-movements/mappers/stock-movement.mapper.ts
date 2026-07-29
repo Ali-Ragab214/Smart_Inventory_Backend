@@ -8,6 +8,8 @@ export class StockMovementMapper {
     const dto = new StockMovementResponseDto();
     dto.id = entity.id;
     dto.skuId = entity.skuId;
+    dto.skuCode = entity.sku?.sku ?? null;
+    dto.skuName = entity.sku?.name ?? null;
     dto.warehouseId = entity.warehouseId;
     dto.reason = entity.reason;
     dto.quantityChange = entity.quantityChange;

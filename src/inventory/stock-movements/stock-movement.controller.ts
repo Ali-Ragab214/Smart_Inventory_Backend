@@ -75,6 +75,21 @@ export class StockMovementController {
   }
 
   /**
+   * GET /inventory/stock-movements
+   *
+   * Recent movements across all SKUs, newest-first.
+   * Query params: `warehouseId`, `limit`.
+   */
+  @Get()
+  async getRecentMovements(
+    @Query('warehouseId') warehouseId?: string,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit?: number,
+  ) {
+    const data = await this.stockMovementService.getRecentMovements(warehouseId, limit);
+    return successResponse(data);
+  }
+
+  /**
    * GET /inventory/stock-movements/sku/:skuId
    *
    * Paginated, filterable history of all stock movements for a single SKU,

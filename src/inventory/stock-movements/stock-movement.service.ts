@@ -143,6 +143,28 @@ export class StockMovementService {
     });
   }
 
+  //  Recent movements across all SKUs (for dashboards)
+
+  /**
+   * Returns the most recent movements, optionally filtered by warehouse.
+   */
+  async getRecentMovements(
+    warehouseId?: string,
+    limit: number = 10,
+  ): Promise<StockMovementResponseDto[]> {
+    const qb = this.movementRepo
+      .createQueryBuilder('sm')
+      .leftJoinAndSelect('sm.sku', 'sku')
+      .orderBy('sm.createdAt', 'DESC');
+
+    if (warehouseId) {
+      qb.andWhere('sm.warehouseId = :warehouseId', { warehouseId });
+    }
+
+    const result = await qb.take(limit).getMany();
+    return this.mapper.toResponseList(result);
+  }
+
   //  Per-SKU history (read path)
 
   /**
