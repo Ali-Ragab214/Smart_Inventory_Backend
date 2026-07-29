@@ -18,7 +18,9 @@ export class AuthService {
     }
 
     const payload = { sub: user.id, username: user.username };
+    const userDto = await this.usersService.findById(user.id);
     return {
+      user: userDto,
       access_token: await this.jwtService.signAsync(payload),
     };
   }

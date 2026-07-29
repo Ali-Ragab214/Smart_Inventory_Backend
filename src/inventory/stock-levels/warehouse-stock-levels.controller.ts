@@ -42,13 +42,6 @@ export class WarehouseStockLevelsController {
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
-  @Get('low-stock')
-  @ApiOperation({ summary: 'List low-stock items for a warehouse' })
-  @ApiOkResponse({ type: StockLevelResponseDto, isArray: true })
-  async findLowStock(@Param('warehouseId', ParseUUIDPipe) warehouseId: string) {
-    const data = await this.stockLevelsService.findLowStockByWarehouse(warehouseId);
-    return successResponse(data);
-  }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a stock level by ID within a warehouse' })
