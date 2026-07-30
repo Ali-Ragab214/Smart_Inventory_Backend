@@ -11,6 +11,7 @@ import {
 import { UserRole } from "../entities/user.entity";
 
 export class CreateUserDto {
+  @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(255)
@@ -27,7 +28,7 @@ export class CreateUserDto {
   @IsString()
   @MinLength(8)
   @MaxLength(255)
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/, {
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]+$/, {
     message:
       "Password must contain uppercase, lowercase, number, and special character",
   })
