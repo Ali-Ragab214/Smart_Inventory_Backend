@@ -12,6 +12,6 @@ import { StockMovementMapper } from './mappers/stock-movement.mapper';
   ],
   controllers: [StockMovementController],
   providers: [StockMovementService, StockMovementMapper],
-  exports: [StockMovementService],
+  exports: [StockMovementService, StockMovementMapper],
 })
 export class StockMovementModule {}

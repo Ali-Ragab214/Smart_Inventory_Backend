@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, QueryFailedError } from 'typeorm';
 import { User, UserRole } from './entities/user.entity';
 import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -48,7 +48,21 @@ export class UsersService {
     }
 
     const user = this.userMapper.toEntity(createUserDto);
-    let saved = await this.userRepository.save(user);
+    let saved: User;
+    try {
+      saved = await this.userRepository.save(user);
+    } catch (err) {
+      if (err instanceof QueryFailedError && (err as any).code === '23505') {
+        const detail = (err as any).detail ?? '';
+        if (detail.includes('email')) {
+          throw new ConflictException('Email already in use');
+        }
+        if (detail.includes('username')) {
+          throw new ConflictException('Username already in use');
+        }
+      }
+      throw err;
+    }
 
     // Auto-create warehouse for tenant_owner registration
     if (!createUserDto.warehouseId && createUserDto.warehouseName && saved.role === UserRole.TENANT_OWNER) {
@@ -70,12 +84,11 @@ export class UsersService {
   }
 
   /**
-   * Return all active (non-deleted) users.
+   * Return all users (active and inactive).
    */
   async findAll(query: PaginationQueryDto): Promise<{ data: UserResponseDto[]; total: number }> {
     const qb = this.userRepository
-      .createQueryBuilder('user')
-      .where('user.isActive = :isActive', { isActive: true });
+      .createQueryBuilder('user');
     applySortAndSearch(qb, 'user', query.sortBy, query.sortOrder, query.search, ['username', 'email', 'name']);
     const result = await paginate(qb, query.page!, query.limit!);
     return { data: this.userMapper.toResponseList(result.data), total: result.total };
@@ -120,42 +133,52 @@ export class UsersService {
    * Update a user's profile fields.
    */
   async update(id: string, updateUserDto: UpdateUserDto): Promise<UserResponseDto> {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) {
+    const existing = await this.userRepository.findOne({ where: { id }, select: ['id', 'email', 'username'] });
+    if (!existing) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
 
-    if (updateUserDto.email && updateUserDto.email !== user.email) {
+    const updates: Partial<User> = {};
+
+    if (updateUserDto.email && updateUserDto.email !== existing.email) {
       const emailTaken = await this.userRepository.existsBy({ email: updateUserDto.email });
       if (emailTaken) {
         throw new ConflictException('Email already in use');
       }
-      user.email = updateUserDto.email.toLowerCase().trim();
+      updates.email = updateUserDto.email.toLowerCase().trim();
     }
 
-    if (updateUserDto.username && updateUserDto.username !== user.username) {
+    if (updateUserDto.username && updateUserDto.username !== existing.username) {
       const usernameTaken = await this.userRepository.existsBy({ username: updateUserDto.username });
       if (usernameTaken) {
         throw new ConflictException('Username already in use');
       }
-      user.username = updateUserDto.username.trim();
+      updates.username = updateUserDto.username.trim();
     }
 
     if (updateUserDto.name !== undefined) {
-      user.name = updateUserDto.name?.trim() ?? '';
+      updates.name = updateUserDto.name?.trim() ?? '';
     }
 
     if (updateUserDto.warehouseId !== undefined) {
-      user.warehouseId = updateUserDto.warehouseId ?? null;
+      updates.warehouseId = updateUserDto.warehouseId ?? null;
     }
 
     if (updateUserDto.role !== undefined) {
-      user.role = updateUserDto.role;
+      updates.role = updateUserDto.role;
     }
 
-    const saved = await this.userRepository.save(user);
-    this.logger.log(`User updated: ${saved.id}`);
-    return this.userMapper.toResponse(saved);
+    if (updateUserDto.isActive !== undefined) {
+      updates.isActive = updateUserDto.isActive;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await this.userRepository.update(id, updates);
+    }
+
+    const saved = await this.userRepository.findOne({ where: { id } });
+    this.logger.log(`User updated: ${saved!.id}`);
+    return this.userMapper.toResponse(saved!);
   }
 
   /**

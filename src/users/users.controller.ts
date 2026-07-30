@@ -23,7 +23,7 @@ import { successResponse, paginatedResponse } from '../utils/response.util';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Roles('super_admin', 'tenant_owner', 'warehouse_manager', 'admin')
+  @Roles('super_admin', 'tenant_owner', 'warehouse_manager')
   @Get()
   async findAll(@Query() query: PaginationQueryDto) {
     const { data, total } = await this.usersService.findAll(query);
@@ -36,14 +36,14 @@ export class UsersController {
     return successResponse(data);
   }
 
-  @Roles('super_admin', 'tenant_owner', 'warehouse_manager', 'admin')
+  @Roles('super_admin', 'tenant_owner', 'warehouse_manager')
   @Post()
   async create(@Body() createUserDto: CreateUserDto) {
     const data = await this.usersService.create(createUserDto);
     return successResponse(data);
   }
 
-  @Roles('super_admin', 'tenant_owner', 'warehouse_manager', 'admin')
+  @Roles('super_admin', 'tenant_owner', 'warehouse_manager')
   @Patch(':id')
   async update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -53,7 +53,7 @@ export class UsersController {
     return successResponse(data);
   }
 
-  @Roles('super_admin', 'tenant_owner', 'warehouse_manager', 'admin')
+  @Roles('super_admin', 'tenant_owner', 'warehouse_manager')
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async remove(@Param('id', ParseUUIDPipe) id: string) {
