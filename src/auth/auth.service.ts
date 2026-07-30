@@ -17,7 +17,12 @@ export class AuthService {
       throw new UnauthorizedException("Invalid email or password");
     }
 
-    const payload = { sub: user.id, username: user.username };
+    const payload = {
+      sub: user.id,
+      username: user.username,
+      role: user.role,
+      warehouseId: user.warehouseId,
+    };
     const userDto = await this.usersService.findById(user.id);
     return {
       user: userDto,
@@ -27,7 +32,12 @@ export class AuthService {
 
   async signup(createUserDto: CreateUserDto): Promise<any> {
     const user = await this.usersService.create(createUserDto);
-    const payload = { sub: user.id, username: user.username };
+    const payload = {
+      sub: user.id,
+      username: user.username,
+      role: user.role,
+      warehouseId: user.warehouseId,
+    };
     return {
       user,
       access_token: await this.jwtService.signAsync(payload),

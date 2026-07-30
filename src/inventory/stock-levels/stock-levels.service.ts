@@ -41,6 +41,24 @@ export class StockLevelsService {
     return { data: result.data.map((sl) => this.toResponse(sl)), total: result.total };
   }
 
+  async findAll(query: StockLevelQueryDto): Promise<{ data: StockLevelResponseDto[]; total: number }> {
+    const qb = this.stockLevelRepo
+      .createQueryBuilder('sl')
+      .leftJoinAndSelect('sl.sku', 'sku')
+      .leftJoinAndSelect('sl.warehouse', 'warehouse')
+      .orderBy('sl.createdAt', 'DESC');
+
+    if (query.warehouseId) {
+      qb.andWhere('sl.warehouseId = :warehouseId', { warehouseId: query.warehouseId });
+    }
+    if (query.skuId) {
+      qb.andWhere('sl.skuId = :skuId', { skuId: query.skuId });
+    }
+
+    const result = await paginate(qb, query.page!, query.limit!);
+    return { data: result.data.map((sl) => this.toResponse(sl)), total: result.total };
+  }
+
   async findLowStock(): Promise<StockLevelResponseDto[]> {
     const levels = await this.stockLevelRepo
       .createQueryBuilder('sl')
