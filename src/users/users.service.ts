@@ -91,7 +91,7 @@ export class UsersService {
     const qb = this.userRepository
       .createQueryBuilder('user')
       .where('user.isActive = :isActive', { isActive: true });
-      
+
     if (currentUser.role !== UserRole.SUPER_ADMIN) {
       qb.andWhere('user.tenantId = :tenantId', { tenantId: currentUser.tenantId });
     }
@@ -147,42 +147,52 @@ export class UsersService {
     if (currentUser.role !== UserRole.SUPER_ADMIN) {
       query.tenantId = currentUser.tenantId;
     }
-    const user = await this.userRepository.findOne({ where: query });
-    if (!user) {
+    const existing = await this.userRepository.findOne({ where: query });
+    if (!existing) {
       throw new NotFoundException({ message: "We couldn't find this user's account.", code: 'USER_NOT_FOUND' });
     }
 
-    if (updateUserDto.email && updateUserDto.email !== user.email) {
+    const updates: Partial<User> = {};
+
+    if (updateUserDto.email && updateUserDto.email !== existing.email) {
       const emailTaken = await this.userRepository.existsBy({ email: updateUserDto.email });
       if (emailTaken) {
         throw new ConflictException({ message: 'This email address is already registered to another account.', code: 'EMAIL_IN_USE' });
       }
-      user.email = updateUserDto.email.toLowerCase().trim();
+      updates.email = updateUserDto.email.toLowerCase().trim();
     }
 
-    if (updateUserDto.username && updateUserDto.username !== user.username) {
+    if (updateUserDto.username && updateUserDto.username !== existing.username) {
       const usernameTaken = await this.userRepository.existsBy({ username: updateUserDto.username });
       if (usernameTaken) {
         throw new ConflictException({ message: 'This username is already taken. Please choose another one.', code: 'USERNAME_IN_USE' });
       }
-      user.username = updateUserDto.username.trim();
+      updates.username = updateUserDto.username.trim();
     }
 
     if (updateUserDto.name !== undefined) {
-      user.name = updateUserDto.name?.trim() ?? '';
+      updates.name = updateUserDto.name?.trim() ?? '';
     }
 
     if (updateUserDto.warehouseId !== undefined) {
-      user.warehouseId = updateUserDto.warehouseId ?? null;
+      updates.warehouseId = updateUserDto.warehouseId ?? null;
     }
 
     if (updateUserDto.role !== undefined) {
-      user.role = updateUserDto.role;
+      updates.role = updateUserDto.role;
     }
 
-    const saved = await this.userRepository.save(user);
-    this.logger.log(`User updated: ${saved.id}`);
-    return this.userMapper.toResponse(saved);
+    if (updateUserDto.isActive !== undefined) {
+      updates.isActive = updateUserDto.isActive;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await this.userRepository.update(id, updates);
+    }
+
+    const saved = await this.userRepository.findOne({ where: { id } });
+    this.logger.log(`User updated: ${saved!.id}`);
+    return this.userMapper.toResponse(saved!);
   }
 
   /**
