@@ -57,6 +57,12 @@ export class User extends AbstractEntity {
   @OneToMany(() => Warehouse, (warehouse) => warehouse.tenant)
   ownedWarehouses!: Warehouse[];
 
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false, name: 'reset_password_token' })
+  resetPasswordToken!: string | null;
+
+  @Column({ type: 'timestamp', nullable: true, select: false, name: 'reset_password_expires' })
+  resetPasswordExpires!: Date | null;
+
   /**
    * Hashes the password before any INSERT or UPDATE.
    * Because `passwordHash` has `select: false`, partial updates that do not
