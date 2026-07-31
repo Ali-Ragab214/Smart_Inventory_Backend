@@ -25,7 +25,7 @@ import { KnowledgeChunksModule } from './knowledge-chunks/knowledge-chunks.modul
       useFactory: (config: ConfigService) => ({
         type: "postgres",
         host: config.get<string>("DB_HOST", "localhost"),
-        port: config.get<number>("DB_PORT", 5432),
+        port: parseInt(config.get<string>("DB_PORT", "5432"), 10),
         username: config.get<string>("DB_USERNAME", "root"),
         password: config.get<string>("DB_PASSWORD", "your_password"),
         database: config.get<string>("DB_NAME", "smart_inventory"),
@@ -46,7 +46,7 @@ import { KnowledgeChunksModule } from './knowledge-chunks/knowledge-chunks.modul
       useFactory: (config: ConfigService) => ({
         connection: {
           host: config.get<string>('REDIS_HOST', 'localhost'),
-          port: config.get<number>('REDIS_PORT', 6379),
+          port: parseInt(config.get<string>('REDIS_PORT', '6379'), 10),
         },
       }),
     }),
