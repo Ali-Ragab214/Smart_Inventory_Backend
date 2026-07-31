@@ -27,9 +27,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
       } else if (typeof res === 'object') {
         const obj = res as Record<string, unknown>;
         message = (obj.message as string) ?? message;
-        error = (obj.error as string) ?? exception.name;
+        error = (obj.code as string) ?? (obj.error as string) ?? exception.name;
         if (Array.isArray(obj.message)) {
           message = (obj.message as string[]).join('; ');
+          if (!obj.code && obj.error === 'Bad Request') {
+            error = 'VALIDATION_ERROR';
+          }
         }
       }
     } else if (exception instanceof Error) {
