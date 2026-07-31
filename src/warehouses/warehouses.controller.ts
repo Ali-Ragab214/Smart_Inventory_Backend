@@ -43,8 +43,12 @@ export class WarehousesController {
   @Get()
   @ApiOperation({ summary: 'List all warehouses' })
   @ApiOkResponse({ type: WarehouseResponseDto, isArray: true })
-  async findAll() {
-    const data = await this.warehousesService.findAll();
+  async findAll(@Req() req: any) {
+    if (req.user.role === 'super_admin') {
+      const data = await this.warehousesService.findAll();
+      return successResponse(data);
+    }
+    const data = await this.warehousesService.findAllByTenant(req.user.id);
     return successResponse(data);
   }
 

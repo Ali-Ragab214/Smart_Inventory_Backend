@@ -26,6 +26,11 @@ export class WarehousesService {
     return this.warehouseMapper.toResponseList(warehouses);
   }
 
+  async findAllByTenant(tenantId: string): Promise<WarehouseResponseDto[]> {
+    const warehouses = await this.warehouseRepository.find({ where: { tenantId } });
+    return this.warehouseMapper.toResponseList(warehouses);
+  }
+
   async findOne(id: string): Promise<WarehouseResponseDto> {
     const warehouse = await this.warehouseRepository.findOne({ where: { id } });
     if (!warehouse) {

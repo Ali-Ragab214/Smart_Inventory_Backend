@@ -50,10 +50,10 @@ export class UsersService {
     const user = this.userMapper.toEntity(createUserDto);
     let saved = await this.userRepository.save(user);
 
-    // Auto-create warehouse for tenant_owner registration
-    if (!createUserDto.warehouseId && createUserDto.warehouseName && saved.role === UserRole.TENANT_OWNER) {
+    // Auto-create main warehouse for tenant_owner registration
+    if (!createUserDto.warehouseId && saved.role === UserRole.TENANT_OWNER) {
       const warehouse = this.warehouseRepository.create({
-        name: createUserDto.warehouseName,
+        name: createUserDto.warehouseName || 'Main Warehouse',
         location: createUserDto.warehouseLocation ?? null,
         tenantId: saved.id,
         isMain: true,
