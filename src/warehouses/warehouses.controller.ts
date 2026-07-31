@@ -9,8 +9,9 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
-  Req,
 } from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 import {
   ApiBadRequestResponse,
   ApiCreatedResponse,
@@ -35,16 +36,16 @@ export class WarehousesController {
   @ApiOperation({ summary: 'Create a warehouse' })
   @ApiCreatedResponse({ type: WarehouseResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request body' })
-  async create(@Body() dto: CreateWarehouseDto, @Req() req: any) {
-    const data = await this.warehousesService.create({ ...dto, tenantId: req.user.id });
+  async create(@Body() dto: CreateWarehouseDto, @CurrentUser() user: UserResponseDto) {
+    const data = await this.warehousesService.create(user.tenantId!, dto);
     return successResponse(data);
   }
 
   @Get()
   @ApiOperation({ summary: 'List all warehouses' })
   @ApiOkResponse({ type: WarehouseResponseDto, isArray: true })
-  async findAll() {
-    const data = await this.warehousesService.findAll();
+  async findAll(@CurrentUser() user: UserResponseDto) {
+    const data = await this.warehousesService.findAll(user);
     return successResponse(data);
   }
 
@@ -53,8 +54,8 @@ export class WarehousesController {
   @ApiParam({ name: 'id', description: 'Warehouse UUID' })
   @ApiOkResponse({ type: WarehouseResponseDto })
   @ApiNotFoundResponse({ description: 'Warehouse not found' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
-    const data = await this.warehousesService.findOne(id);
+  async findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {
+    const data = await this.warehousesService.findOne(user, id);
     return successResponse(data);
   }
 
@@ -64,8 +65,8 @@ export class WarehousesController {
   @ApiOkResponse({ type: WarehouseResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request body' })
   @ApiNotFoundResponse({ description: 'Warehouse not found' })
-  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateWarehouseDto) {
-    const data = await this.warehousesService.update(id, dto);
+  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateWarehouseDto, @CurrentUser() user: UserResponseDto) {
+    const data = await this.warehousesService.update(user.tenantId!, id, dto);
     return successResponse(data);
   }
 
@@ -75,8 +76,8 @@ export class WarehousesController {
   @ApiParam({ name: 'id', description: 'Warehouse UUID' })
   @ApiOkResponse({ description: 'Warehouse deleted successfully' })
   @ApiNotFoundResponse({ description: 'Warehouse not found' })
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.warehousesService.remove(id);
+  async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {
+    await this.warehousesService.remove(user.tenantId!, id);
     return successResponse(null);
   }
 }

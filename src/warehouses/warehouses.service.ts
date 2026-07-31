@@ -7,6 +7,8 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { WarehouseResponseDto } from './dto/warehouse-response.dto';
 import { WarehouseMapper } from './mappers/warehouse.mapper';
 import { StockLevelsService } from '../inventory/stock-levels/stock-levels.service';
+import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserRole } from '../users/entities/user.entity';
 
 @Injectable()
 export class WarehousesService {
@@ -17,40 +19,52 @@ export class WarehousesService {
     private readonly stockLevelsService: StockLevelsService,
   ) {}
 
-  async create(dto: CreateWarehouseDto): Promise<WarehouseResponseDto> {
+  async create(tenantId: string, dto: CreateWarehouseDto): Promise<WarehouseResponseDto> {
     const warehouse = this.warehouseMapper.toEntity(dto);
+    warehouse.tenantId = tenantId;
     const saved = await this.warehouseRepository.save(warehouse);
-    await this.stockLevelsService.autoInitializeForWarehouse(saved.id);
+    await this.stockLevelsService.autoInitializeForWarehouse(tenantId, saved.id);
     return this.warehouseMapper.toResponse(saved);
   }
 
-  async findAll(): Promise<WarehouseResponseDto[]> {
-    const warehouses = await this.warehouseRepository.find();
+  async findAll(user: UserResponseDto): Promise<WarehouseResponseDto[]> {
+    const query: any = { tenantId: user.tenantId! };
+    
+    if (user.role === UserRole.WAREHOUSE_MANAGER || user.role === UserRole.INVENTORY_CLERK) {
+      if (!user.warehouseId) return [];
+      query.id = user.warehouseId;
+    }
+
+    const warehouses = await this.warehouseRepository.find({ where: query });
     return this.warehouseMapper.toResponseList(warehouses);
   }
 
-  async findOne(id: string): Promise<WarehouseResponseDto> {
-    const warehouse = await this.warehouseRepository.findOne({ where: { id } });
+  async findOne(user: UserResponseDto, id: string): Promise<WarehouseResponseDto> {
+    if ((user.role === UserRole.WAREHOUSE_MANAGER || user.role === UserRole.INVENTORY_CLERK) && user.warehouseId !== id) {
+      throw new NotFoundException({ message: 'The specified warehouse could not be found.', code: 'WAREHOUSE_NOT_FOUND' });
+    }
+
+    const warehouse = await this.warehouseRepository.findOne({ where: { id, tenantId: user.tenantId! } });
     if (!warehouse) {
-      throw new NotFoundException(`Warehouse with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified warehouse could not be found.', code: 'WAREHOUSE_NOT_FOUND' });
     }
     return this.warehouseMapper.toResponse(warehouse);
   }
 
-  async update(id: string, dto: UpdateWarehouseDto): Promise<WarehouseResponseDto> {
-    const warehouse = await this.warehouseRepository.findOne({ where: { id } });
+  async update(tenantId: string, id: string, dto: UpdateWarehouseDto): Promise<WarehouseResponseDto> {
+    const warehouse = await this.warehouseRepository.findOne({ where: { id, tenantId } });
     if (!warehouse) {
-      throw new NotFoundException(`Warehouse with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified warehouse could not be found.', code: 'WAREHOUSE_NOT_FOUND' });
     }
     const updated = this.warehouseMapper.updateEntity(warehouse, dto);
     const saved = await this.warehouseRepository.save(updated);
     return this.warehouseMapper.toResponse(saved);
   }
 
-  async remove(id: string): Promise<void> {
-    const warehouse = await this.warehouseRepository.findOne({ where: { id } });
+  async remove(tenantId: string, id: string): Promise<void> {
+    const warehouse = await this.warehouseRepository.findOne({ where: { id, tenantId } });
     if (!warehouse) {
-      throw new NotFoundException(`Warehouse with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified warehouse could not be found.', code: 'WAREHOUSE_NOT_FOUND' });
     }
     await this.warehouseRepository.softRemove(warehouse);
   }

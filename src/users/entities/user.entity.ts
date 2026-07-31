@@ -2,6 +2,7 @@ import { Entity, Column, Index, BeforeInsert, BeforeUpdate, ManyToOne, OneToMany
 import * as bcrypt from 'bcryptjs';
 import { AbstractEntity } from '../../shared/base.entity';
 import { Warehouse } from '../../warehouses/entities/warehouse.entity';
+import { Tenant } from '../../tenants/entities/tenant.entity';
 
 export enum UserRole {
   SUPER_ADMIN = 'super_admin',
@@ -44,6 +45,14 @@ export class User extends AbstractEntity {
   @Index('idx_users_warehouse')
   @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
   warehouseId!: string | null;
+
+  @ManyToOne(() => Tenant, (tenant) => tenant.users, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'tenant_id' })
+  tenant!: Tenant | null;
+
+  @Index('idx_users_tenant')
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId!: string | null;
 
   @OneToMany(() => Warehouse, (warehouse) => warehouse.tenant)
   ownedWarehouses!: Warehouse[];

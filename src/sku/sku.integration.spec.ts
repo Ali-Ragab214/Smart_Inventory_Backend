@@ -6,6 +6,7 @@ import { SkuController } from './sku.controller';
 import { SkuService } from './sku.service';
 import { Sku } from './entities/sku.entity';
 import { SkuMapper } from './mappers/sku.mapper';
+import { StockLevelsService } from '../inventory/stock-levels/stock-levels.service';
 
 describe('Sku CSV Import Integration Flow', () => {
   let controller: SkuController;
@@ -84,6 +85,10 @@ describe('Sku CSV Import Integration Flow', () => {
           provide: DataSource,
           useValue: mockDataSource,
         },
+        {
+          provide: StockLevelsService,
+          useValue: { autoInitializeForSku: jest.fn(), autoInitializeForSkus: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -127,15 +132,15 @@ SKU004,Monitor,27-inch 4K,Displays,PCS,300,450`;
     const errors = response.data.errors;
     expect(errors).toHaveLength(3);
 
-    expect(errors[0].row).toBe(1);
+    expect(errors[0].row).toBe(2);
     expect(errors[0].skuCode).toBe('SKU001');
     expect(errors[0].message).toBe('SKU code "SKU001" already exists');
 
-    expect(errors[1].row).toBe(3);
+    expect(errors[1].row).toBe(4);
     expect(errors[1].skuCode).toBe('SKU002');
     expect(errors[1].message).toContain('Duplicate SKU code "SKU002" found in CSV file');
 
-    expect(errors[2].row).toBe(4);
+    expect(errors[2].row).toBe(5);
     expect(errors[2].skuCode).toBe('SKU003');
 
     expect(savedEntitiesInDb).toHaveLength(3);

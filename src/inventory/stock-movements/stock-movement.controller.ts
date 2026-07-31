@@ -21,6 +21,8 @@ import { TransferStockDto } from './dto/transfer-stock.dto';
 import { StockMovementResponseDto } from './dto/stock-movement-response.dto';
 import { successResponse, paginatedResponse } from '../../utils/response.util';
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '../../auth/decorators/current-user/current-user.decorator';
+import { UserResponseDto } from '../../users/dto/user-response.dto';
 
 @ApiTags('Stock Movements')
 @ApiBearerAuth()
@@ -37,8 +39,8 @@ export class StockMovementController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Record a stock movement' })
   @ApiCreatedResponse({ type: StockMovementResponseDto })
-  async recordMovement(@Body() dto: RecordMovementDto) {
-    const data = await this.stockMovementService.recordMovement({
+  async recordMovement(@Body() dto: RecordMovementDto, @CurrentUser() user: UserResponseDto) {
+    const data = await this.stockMovementService.recordMovement(user.tenantId!, {
       skuId: dto.skuId,
       warehouseId: dto.warehouseId,
       reason: dto.reason,
@@ -61,8 +63,8 @@ export class StockMovementController {
   @Post('transfer')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Transfer stock between warehouses' })
-  async transfer(@Body() dto: TransferStockDto) {
-    const data = await this.stockMovementService.transfer({
+  async transfer(@Body() dto: TransferStockDto, @CurrentUser() user: UserResponseDto) {
+    const data = await this.stockMovementService.transfer(user.tenantId!, {
       skuId: dto.skuId,
       fromWarehouseId: dto.fromWarehouseId,
       toWarehouseId: dto.toWarehouseId,
@@ -84,8 +86,9 @@ export class StockMovementController {
   async getRecentMovements(
     @Query('warehouseId') warehouseId?: string,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit?: number,
+    @CurrentUser() user?: UserResponseDto,
   ) {
-    const data = await this.stockMovementService.getRecentMovements(warehouseId, limit);
+    const data = await this.stockMovementService.getRecentMovements(user!.tenantId!, warehouseId, limit);
     return successResponse(data);
   }
 
@@ -102,8 +105,9 @@ export class StockMovementController {
   async getHistoryForSku(
     @Param('skuId', ParseUUIDPipe) skuId: string,
     @Query() query: StockMovementQueryDto,
+    @CurrentUser() user?: UserResponseDto,
   ) {
-    const { data, total } = await this.stockMovementService.getHistoryForSku(skuId, query);
+    const { data, total } = await this.stockMovementService.getHistoryForSku(user!.tenantId!, skuId, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
@@ -119,8 +123,9 @@ export class StockMovementController {
   async reconcileBalance(
     @Param('skuId', ParseUUIDPipe) skuId: string,
     @Query('warehouseId', ParseUUIDPipe) warehouseId: string,
+    @CurrentUser() user?: UserResponseDto,
   ) {
-    const data = await this.stockMovementService.reconcileBalance(skuId, warehouseId);
+    const data = await this.stockMovementService.reconcileBalance(user!.tenantId!, skuId, warehouseId);
     return successResponse(data);
   }
 
@@ -136,8 +141,9 @@ export class StockMovementController {
     @Param('skuId', ParseUUIDPipe) skuId: string,
     @Query('warehouseId', ParseUUIDPipe) warehouseId: string,
     @Query('sinceDays', new DefaultValuePipe(30), ParseIntPipe) sinceDays: number,
+    @CurrentUser() user?: UserResponseDto,
   ) {
-    const data = await this.stockMovementService.getConsumptionSeries(skuId, warehouseId, sinceDays);
+    const data = await this.stockMovementService.getConsumptionSeries(user!.tenantId!, skuId, warehouseId, sinceDays);
     return successResponse(data);
   }
 }

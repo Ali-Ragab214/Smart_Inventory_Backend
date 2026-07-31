@@ -26,8 +26,9 @@ export class PurchaseOrdersService {
     private readonly mapper: PurchaseOrderMapper,
   ) {}
 
-  async create(dto: CreatePurchaseOrderDto): Promise<PurchaseOrderResponseDto> {
+  async create(tenantId: string, dto: CreatePurchaseOrderDto): Promise<PurchaseOrderResponseDto> {
     const po = this.mapper.toEntity(dto);
+    po.tenantId = tenantId;
     const saved = await this.poRepository.save(po);
     const loaded = await this.poRepository.findOne({
       where: { id: saved.id },
@@ -36,10 +37,11 @@ export class PurchaseOrdersService {
     return this.mapper.toResponse(loaded!);
   }
 
-  async findAll(query: PurchaseOrderQueryDto): Promise<{ data: PurchaseOrderResponseDto[]; total: number }> {
+  async findAll(tenantId: string, query: PurchaseOrderQueryDto): Promise<{ data: PurchaseOrderResponseDto[]; total: number }> {
     const qb = this.poRepository
       .createQueryBuilder('po')
       .leftJoinAndSelect('po.lineItems', 'lineItems')
+      .where('po.tenantId = :tenantId', { tenantId })
       .orderBy('po.createdAt', 'DESC');
 
     if (query.status) {
@@ -54,31 +56,29 @@ export class PurchaseOrdersService {
     return { data: this.mapper.toResponseList(result.data), total: result.total };
   }
 
-  async findOne(id: string): Promise<PurchaseOrderResponseDto> {
+  async findOne(tenantId: string, id: string): Promise<PurchaseOrderResponseDto> {
     const po = await this.poRepository.findOne({
-      where: { id },
+      where: { id, tenantId },
       relations: { lineItems: true },
     });
     if (!po) {
-      throw new NotFoundException(`Purchase order with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The requested purchase order could not be found.', code: 'PURCHASE_ORDER_NOT_FOUND' });
     }
     return this.mapper.toResponse(po);
   }
 
-  async transition(id: string, targetStatus: string): Promise<PurchaseOrderResponseDto> {
+  async transition(tenantId: string, id: string, targetStatus: string): Promise<PurchaseOrderResponseDto> {
     const po = await this.poRepository.findOne({
-      where: { id },
+      where: { id, tenantId },
       relations: { lineItems: true },
     });
     if (!po) {
-      throw new NotFoundException(`Purchase order with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The requested purchase order could not be found.', code: 'PURCHASE_ORDER_NOT_FOUND' });
     }
 
     const allowed = VALID_TRANSITIONS[po.status] ?? [];
     if (!allowed.includes(targetStatus)) {
-      throw new BadRequestException(
-        `Cannot transition from '${po.status}' to '${targetStatus}'. Allowed transitions: ${allowed.join(', ') || 'none (terminal status)'}`,
-      );
+      throw new BadRequestException({ message: `Cannot transition from '${po.status}' to '${targetStatus}'. Allowed transitions: ${allowed.join(', ') || 'none (terminal status)'}`, code: 'INVALID_STATUS_TRANSITION' });
     }
 
     po.status = targetStatus;

@@ -5,7 +5,7 @@ import {
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
-import { AbstractEntity } from '../../shared/base.entity';
+import { AbstractTenantEntity } from '../../shared/tenant.entity';
 import { Category } from '../../categories/entities/category.entity';
 import { Vendor } from '../../vendors/entities/vendor.entity';
 
@@ -13,7 +13,7 @@ import { Vendor } from '../../vendors/entities/vendor.entity';
  * Sku database entity representing unique product variants.
  */
 @Entity('skus')
-export class Sku extends AbstractEntity {
+export class Sku extends AbstractTenantEntity {
   @Index({ unique: true })
   @Column({ length: 100 })
   sku!: string;

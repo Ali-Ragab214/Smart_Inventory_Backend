@@ -14,6 +14,8 @@ import {
   UploadedFile,
   BadRequestException,
 } from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
@@ -42,8 +44,8 @@ export class SkuController {
   @ApiOperation({ summary: 'Create a single SKU' })
   @ApiOkResponse({ type: SkuResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request payload' })
-  async create(@Body() createSkuDto: CreateSkuDto) {
-    const data = await this.skuService.create(createSkuDto);
+  async create(@Body() createSkuDto: CreateSkuDto, @CurrentUser() user: UserResponseDto) {
+    const data = await this.skuService.create(user.tenantId!, createSkuDto);
     return successResponse(data);
   }
 
@@ -70,24 +72,24 @@ export class SkuController {
   })
   @ApiBadRequestResponse({ description: 'Missing CSV file, malformed CSV, or invalid file extension' })
   @UseInterceptors(FileInterceptor('file'))
-  async importCsv(@UploadedFile() file?: Express.Multer.File) {
+  async importCsv(@UploadedFile() file: Express.Multer.File | undefined, @CurrentUser() user: UserResponseDto) {
     if (!file) {
-      throw new BadRequestException('CSV file is required');
+      throw new BadRequestException({ message: 'Please upload a CSV file to proceed.', code: 'MISSING_CSV_FILE' });
     }
 
     if (file.originalname && !file.originalname.toLowerCase().endsWith('.csv')) {
-      throw new BadRequestException('Invalid file format. Please upload a CSV file.');
+      throw new BadRequestException({ message: 'The uploaded file format is not supported. Please ensure it is a valid CSV.', code: 'INVALID_FILE_FORMAT' });
     }
 
-    const data = await this.skuService.importCsv(file.buffer);
+    const data = await this.skuService.importCsv(user.tenantId!, file.buffer);
     return successResponse(data);
   }
 
   @Get()
   @ApiOperation({ summary: 'List SKUs' })
   @ApiOkResponse({ type: SkuResponseDto, isArray: true })
-  async findAll(@Query() query: SkuQueryDto) {
-    const { data, total } = await this.skuService.findAll(query);
+  async findAll(@Query() query: SkuQueryDto, @CurrentUser() user: UserResponseDto) {
+    const { data, total } = await this.skuService.findAll(user.tenantId!, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
@@ -95,8 +97,8 @@ export class SkuController {
   @ApiOperation({ summary: 'Get a SKU by ID' })
   @ApiParam({ name: 'id', description: 'SKU UUID' })
   @ApiOkResponse({ type: SkuResponseDto })
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
-    const data = await this.skuService.findOne(id);
+  async findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {
+    const data = await this.skuService.findOne(user.tenantId!, id);
     return successResponse(data);
   }
 
@@ -108,8 +110,9 @@ export class SkuController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateSkuDto: UpdateSkuDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.skuService.update(id, updateSkuDto);
+    const data = await this.skuService.update(user.tenantId!, id, updateSkuDto);
     return successResponse(data);
   }
 
@@ -118,8 +121,8 @@ export class SkuController {
   @ApiOperation({ summary: 'Delete a SKU' })
   @ApiParam({ name: 'id', description: 'SKU UUID' })
   @ApiOkResponse({ description: 'SKU deleted successfully' })
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.skuService.remove(id);
+  async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {
+    await this.skuService.remove(user.tenantId!, id);
     return successResponse(null);
   }
 }

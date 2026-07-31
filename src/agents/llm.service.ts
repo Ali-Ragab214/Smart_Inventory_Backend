@@ -33,6 +33,7 @@ export class LLMService {
   }
 
   async runWithTools(
+    tenantId: string,
     systemPrompt: string,
     userMessage: string,
     tools: Anthropic.Messages.Tool[],
@@ -70,6 +71,7 @@ export class LLMService {
         let result: unknown;
         try {
           result = await toolExecutor.execute(
+            tenantId,
             toolUse.name,
             toolUse.input as Record<string, unknown>,
           );

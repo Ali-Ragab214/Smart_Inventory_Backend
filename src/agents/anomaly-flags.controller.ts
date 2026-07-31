@@ -24,6 +24,8 @@ import { AnomalyQueryDto } from './dto/anomaly-query.dto';
 import { ReviewAnomalyFlagDto } from './dto/review-anomaly-flag.dto';
 import { AnomalyFlagResponseDto } from './dto/anomaly-flag-response.dto';
 import { paginatedResponse, successResponse } from '../utils/response.util';
+import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 
 @ApiTags('anomalies')
 @ApiBearerAuth()
@@ -35,16 +37,17 @@ export class AnomalyFlagsController {
   @ApiOperation({ summary: 'Create an anomaly flag' })
   @ApiBody({ type: CreateAnomalyFlagDto })
   @ApiCreatedResponse({ type: AnomalyFlagResponseDto })
-  async create(@Body() body: CreateAnomalyFlagDto) {
-    const data = await this.service.create(body);
+  async create(@Body() body: CreateAnomalyFlagDto, @CurrentUser() user: UserResponseDto) {
+    const data = await this.service.create(user.tenantId!, body);
     return successResponse(data);
   }
 
   @Get()
   @ApiOperation({ summary: 'List anomaly flags, optionally filtered by status' })
   @ApiOkResponse({ type: AnomalyFlagResponseDto, isArray: true })
-  async findAll(@Query() query: AnomalyQueryDto) {
+  async findAll(@Query() query: AnomalyQueryDto, @CurrentUser() user: UserResponseDto) {
     const { data, total } = await this.service.findAll(
+      user.tenantId!,
       query.status,
       query.page,
       query.limit,
@@ -62,8 +65,9 @@ export class AnomalyFlagsController {
   async review(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: ReviewAnomalyFlagDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.service.markReviewed(id, body.reviewedBy);
+    const data = await this.service.markReviewed(user.tenantId!, id, body.reviewedBy);
     return successResponse(data);
   }
 
@@ -72,8 +76,8 @@ export class AnomalyFlagsController {
   @ApiParam({ name: 'id', description: 'Anomaly flag UUID' })
   @ApiCreatedResponse({ type: AnomalyFlagResponseDto })
   @ApiNotFoundResponse({ description: 'Anomaly flag not found' })
-  async escalate(@Param('id', ParseUUIDPipe) id: string) {
-    const data = await this.service.escalate(id);
+  async escalate(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {
+    const data = await this.service.escalate(user.tenantId!, id);
     return successResponse(data);
   }
 }

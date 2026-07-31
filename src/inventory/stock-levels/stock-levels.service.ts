@@ -23,6 +23,7 @@ export class StockLevelsService {
   ) {}
 
   async findByWarehouse(
+    tenantId: string,
     warehouseId: string,
     query: StockLevelQueryDto,
   ): Promise<{ data: StockLevelResponseDto[]; total: number }> {
@@ -31,6 +32,7 @@ export class StockLevelsService {
       .leftJoinAndSelect('sl.sku', 'sku')
       .leftJoinAndSelect('sl.warehouse', 'warehouse')
       .where('sl.warehouseId = :warehouseId', { warehouseId })
+      .andWhere('sl.tenantId = :tenantId', { tenantId })
       .orderBy('sl.createdAt', 'DESC');
 
     if (query.skuId) {
@@ -41,24 +43,26 @@ export class StockLevelsService {
     return { data: result.data.map((sl) => this.toResponse(sl)), total: result.total };
   }
 
-  async findLowStock(): Promise<StockLevelResponseDto[]> {
+  async findLowStock(tenantId: string): Promise<StockLevelResponseDto[]> {
     const levels = await this.stockLevelRepo
       .createQueryBuilder('sl')
       .leftJoinAndSelect('sl.sku', 'sku')
       .leftJoinAndSelect('sl.warehouse', 'warehouse')
-      .where('sl.quantity <= sl.reorderThreshold')
+      .where('sl.tenantId = :tenantId', { tenantId })
+      .andWhere('sl.quantity <= sl.reorderThreshold')
       .orderBy('sl.quantity', 'ASC')
       .getMany();
 
     return levels.map((sl) => this.toResponse(sl));
   }
 
-  async findLowStockByWarehouse(warehouseId: string): Promise<StockLevelResponseDto[]> {
+  async findLowStockByWarehouse(tenantId: string, warehouseId: string): Promise<StockLevelResponseDto[]> {
     const levels = await this.stockLevelRepo
       .createQueryBuilder('sl')
       .leftJoinAndSelect('sl.sku', 'sku')
       .leftJoinAndSelect('sl.warehouse', 'warehouse')
       .where('sl.warehouseId = :warehouseId', { warehouseId })
+      .andWhere('sl.tenantId = :tenantId', { tenantId })
       .andWhere('sl.quantity <= sl.reorderThreshold')
       .orderBy('sl.quantity', 'ASC')
       .getMany();
@@ -87,50 +91,51 @@ export class StockLevelsService {
     } else if (user.role === UserRole.SUPER_ADMIN) {
       // Super admin can see all low stock
     } else {
-      throw new ForbiddenException('You do not have permission to view low stock data');
+      throw new ForbiddenException({ message: 'You do not have the required permissions to view low stock alerts.', code: 'FORBIDDEN_LOW_STOCK_VIEW' });
     }
 
     const levels = await qb.getMany();
     return levels.map((sl) => this.toResponse(sl));
   }
 
-  async findOne(id: string): Promise<StockLevelResponseDto> {
+  async findOne(tenantId: string, id: string): Promise<StockLevelResponseDto> {
     const stockLevel = await this.stockLevelRepo.findOne({
-      where: { id },
+      where: { id, tenantId },
       relations: ['sku', 'warehouse'],
     });
 
     if (!stockLevel) {
-      throw new NotFoundException(`Stock level with ID "${id}" not found`);
+      throw new NotFoundException({ message: "We couldn't find the stock level information for this item.", code: 'STOCK_LEVEL_NOT_FOUND' });
     }
 
     return this.toResponse(stockLevel);
   }
 
-  async findOneByWarehouse(warehouseId: string, id: string): Promise<StockLevelResponseDto> {
+  async findOneByWarehouse(tenantId: string, warehouseId: string, id: string): Promise<StockLevelResponseDto> {
     const stockLevel = await this.stockLevelRepo.findOne({
-      where: { id, warehouseId },
+      where: { id, warehouseId, tenantId },
       relations: ['sku', 'warehouse'],
     });
 
     if (!stockLevel) {
-      throw new NotFoundException(`Stock level with ID "${id}" not found in this warehouse`);
+      throw new NotFoundException({ message: "We couldn't find the stock level information for this item.", code: 'STOCK_LEVEL_NOT_FOUND' });
     }
 
     return this.toResponse(stockLevel);
   }
 
   async update(
+    tenantId: string,
     id: string,
     dto: UpdateStockLevelDto,
   ): Promise<StockLevelResponseDto> {
     const stockLevel = await this.stockLevelRepo.findOne({
-      where: { id },
+      where: { id, tenantId },
       relations: ['sku', 'warehouse'],
     });
 
     if (!stockLevel) {
-      throw new NotFoundException(`Stock level with ID "${id}" not found`);
+      throw new NotFoundException({ message: "We couldn't find the stock level information for this item.", code: 'STOCK_LEVEL_NOT_FOUND' });
     }
 
     if (dto.reorderThreshold !== undefined) {
@@ -144,9 +149,9 @@ export class StockLevelsService {
     return this.toResponse(stockLevel);
   }
 
-  async initializeForWarehouse(warehouseId: string): Promise<number> {
+  async initializeForWarehouse(tenantId: string, warehouseId: string): Promise<number> {
     const existing = await this.stockLevelRepo.find({
-      where: { warehouseId },
+      where: { warehouseId, tenantId },
       select: ['skuId'],
     });
     const existingSkuIds = new Set(existing.map((sl) => sl.skuId));
@@ -160,6 +165,7 @@ export class StockLevelsService {
       this.stockLevelRepo.create({
         skuId: sku.id,
         warehouseId,
+        tenantId,
         quantity: 0,
         reorderThreshold: 0,
         safetyStock: 0,
@@ -173,18 +179,21 @@ export class StockLevelsService {
     return entries.length;
   }
 
-  async autoInitializeForWarehouse(warehouseId: string): Promise<void> {
-    await this.initializeForWarehouse(warehouseId);
+  async autoInitializeForWarehouse(tenantId: string, warehouseId: string): Promise<void> {
+    await this.initializeForWarehouse(tenantId, warehouseId);
   }
 
-  async autoInitializeForSku(skuId: string): Promise<void> {
+  async autoInitializeForSku(tenantId: string, skuId: string): Promise<void> {
     const existing = await this.stockLevelRepo.find({
       where: { skuId },
       select: ['warehouseId'],
     });
     const existingWarehouseIds = new Set(existing.map((sl) => sl.warehouseId));
 
-    const allWarehouses = await this.warehouseRepo.find({ select: ['id'] });
+    const allWarehouses = await this.warehouseRepo.find({ 
+      where: { tenantId },
+      select: ['id', 'tenantId'] 
+    });
     const missingWarehouses = allWarehouses.filter((w) => !existingWarehouseIds.has(w.id));
 
     if (missingWarehouses.length === 0) return;
@@ -193,6 +202,7 @@ export class StockLevelsService {
       this.stockLevelRepo.create({
         skuId,
         warehouseId: warehouse.id,
+        tenantId: warehouse.tenantId, // Auto inherit tenantId from warehouse
         quantity: 0,
         reorderThreshold: 0,
         safetyStock: 0,
@@ -204,10 +214,13 @@ export class StockLevelsService {
     });
   }
 
-  async autoInitializeForSkus(skuIds: string[]): Promise<void> {
+  async autoInitializeForSkus(tenantId: string, skuIds: string[]): Promise<void> {
     if (skuIds.length === 0) return;
 
-    const allWarehouses = await this.warehouseRepo.find({ select: ['id'] });
+    const allWarehouses = await this.warehouseRepo.find({ 
+      where: { tenantId },
+      select: ['id', 'tenantId'] 
+    });
     if (allWarehouses.length === 0) return;
 
     const existing = await this.stockLevelRepo.find({
@@ -224,6 +237,7 @@ export class StockLevelsService {
             this.stockLevelRepo.create({
               skuId,
               warehouseId: warehouse.id,
+              tenantId: warehouse.tenantId,
               quantity: 0,
               reorderThreshold: 0,
               safetyStock: 0,

@@ -5,7 +5,7 @@ import {
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
-import { AbstractEntity } from '../../../shared/base.entity';
+import { AbstractTenantEntity } from '../../../shared/tenant.entity';
 import { Sku } from '../../../sku/entities/sku.entity';
 import { User } from '../../../users/entities/user.entity';
 import { Warehouse } from '../../../warehouses/entities/warehouse.entity';
@@ -15,7 +15,7 @@ import { MovementReason } from '../enums/movement-reason.enum';
 @Entity('stock_movements')
 @Index('idx_stock_movements_sku_created', ['skuId', 'createdAt'])
 @Index('idx_stock_movements_created', ['createdAt'])
-export class StockMovement extends AbstractEntity {
+export class StockMovement extends AbstractTenantEntity {
   // ── Relations ────────────────────────────────────────────────────────────
   @ManyToOne(() => Sku, { onDelete: 'RESTRICT', nullable: false })
   @JoinColumn({ name: 'sku_id' })

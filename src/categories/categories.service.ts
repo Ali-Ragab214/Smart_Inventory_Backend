@@ -15,39 +15,40 @@ export class CategoriesService {
     private readonly categoryMapper: CategoryMapper,
   ) {}
 
-  async create(dto: CreateCategoryDto): Promise<CategoryResponseDto> {
+  async create(tenantId: string, dto: CreateCategoryDto): Promise<CategoryResponseDto> {
     const category = this.categoryMapper.toEntity(dto);
+    category.tenantId = tenantId;
     const saved = await this.categoryRepository.save(category);
     return this.categoryMapper.toResponse(saved);
   }
 
-  async findAll(): Promise<CategoryResponseDto[]> {
-    const categories = await this.categoryRepository.find();
+  async findAll(tenantId: string): Promise<CategoryResponseDto[]> {
+    const categories = await this.categoryRepository.find({ where: { tenantId } });
     return this.categoryMapper.toResponseList(categories);
   }
 
-  async findOne(id: string): Promise<CategoryResponseDto> {
-    const category = await this.categoryRepository.findOne({ where: { id } });
+  async findOne(tenantId: string, id: string): Promise<CategoryResponseDto> {
+    const category = await this.categoryRepository.findOne({ where: { id, tenantId } });
     if (!category) {
-      throw new NotFoundException(`Category with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified category could not be found.', code: 'CATEGORY_NOT_FOUND' });
     }
     return this.categoryMapper.toResponse(category);
   }
 
-  async update(id: string, dto: UpdateCategoryDto): Promise<CategoryResponseDto> {
-    const category = await this.categoryRepository.findOne({ where: { id } });
+  async update(tenantId: string, id: string, dto: UpdateCategoryDto): Promise<CategoryResponseDto> {
+    const category = await this.categoryRepository.findOne({ where: { id, tenantId } });
     if (!category) {
-      throw new NotFoundException(`Category with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified category could not be found.', code: 'CATEGORY_NOT_FOUND' });
     }
     const updated = this.categoryMapper.updateEntity(category, dto);
     const saved = await this.categoryRepository.save(updated);
     return this.categoryMapper.toResponse(saved);
   }
 
-  async remove(id: string): Promise<void> {
-    const category = await this.categoryRepository.findOne({ where: { id } });
+  async remove(tenantId: string, id: string): Promise<void> {
+    const category = await this.categoryRepository.findOne({ where: { id, tenantId } });
     if (!category) {
-      throw new NotFoundException(`Category with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified category could not be found.', code: 'CATEGORY_NOT_FOUND' });
     }
     await this.categoryRepository.softRemove(category);
   }
