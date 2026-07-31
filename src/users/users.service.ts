@@ -116,6 +116,21 @@ export class UsersService {
       .getOne();
   }
 
+  async findByResetTokenForAuth(token: string): Promise<User | null> {
+    return this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .addSelect('user.resetPasswordToken')
+      .addSelect('user.resetPasswordExpires')
+      .where('user.resetPasswordToken = :token', { token })
+      .getOne();
+  }
+
+  async saveRawUser(user: User): Promise<User> {
+    return this.userRepository.save(user);
+  }
+
+
   /**
    * Update a user's profile fields.
    */
