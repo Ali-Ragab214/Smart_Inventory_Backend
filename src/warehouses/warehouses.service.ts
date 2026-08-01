@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Warehouse } from './entities/warehouse.entity';
@@ -8,7 +8,8 @@ import { WarehouseResponseDto } from './dto/warehouse-response.dto';
 import { WarehouseMapper } from './mappers/warehouse.mapper';
 import { StockLevelsService } from '../inventory/stock-levels/stock-levels.service';
 import { UserResponseDto } from '../users/dto/user-response.dto';
-import { UserRole } from '../users/entities/user.entity';
+import { UserRole, User } from '../users/entities/user.entity';
+import { WarehouseStatus } from './entities/warehouse.entity';
 
 @Injectable()
 export class WarehousesService {
@@ -64,21 +65,40 @@ export class WarehousesService {
     return this.warehouseMapper.toResponse(warehouse);
   }
 
-  async update(tenantId: string, id: string, dto: UpdateWarehouseDto): Promise<WarehouseResponseDto> {
+  async update(currentUser: UserResponseDto, id: string, dto: UpdateWarehouseDto): Promise<WarehouseResponseDto> {
+    const tenantId = currentUser.tenantId!;
     const warehouse = await this.warehouseRepository.findOne({ where: { id, tenantId } });
     if (!warehouse) {
       throw new NotFoundException({ message: 'The specified warehouse could not be found.', code: 'WAREHOUSE_NOT_FOUND' });
     }
+    
+    if (dto.status !== undefined && dto.status !== warehouse.status) {
+      if (currentUser.role !== UserRole.TENANT_OWNER && currentUser.role !== UserRole.SUPER_ADMIN) {
+        throw new ForbiddenException('Only tenant owners can activate or deactivate a warehouse.');
+      }
+    }
+
     const updated = this.warehouseMapper.updateEntity(warehouse, dto);
     const saved = await this.warehouseRepository.save(updated);
     return this.warehouseMapper.toResponse(saved);
   }
 
-  async remove(tenantId: string, id: string): Promise<void> {
+  async remove(currentUser: UserResponseDto, id: string): Promise<void> {
+    const tenantId = currentUser.tenantId!;
     const warehouse = await this.warehouseRepository.findOne({ where: { id, tenantId } });
     if (!warehouse) {
       throw new NotFoundException({ message: 'The specified warehouse could not be found.', code: 'WAREHOUSE_NOT_FOUND' });
     }
-    await this.warehouseRepository.softRemove(warehouse);
+    
+    warehouse.status = WarehouseStatus.INACTIVE;
+    await this.warehouseRepository.save(warehouse);
+
+    await this.warehouseRepository.manager
+      .createQueryBuilder()
+      .update(User)
+      .set({ isActive: false })
+      .where('warehouse_id = :warehouseId', { warehouseId: id })
+      .andWhere('role = :role', { role: UserRole.WAREHOUSE_MANAGER })
+      .execute();
   }
 }
