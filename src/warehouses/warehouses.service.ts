@@ -28,8 +28,12 @@ export class WarehousesService {
   }
 
   async findAll(user: UserResponseDto): Promise<WarehouseResponseDto[]> {
-    const query: any = { tenantId: user.tenantId! };
-    
+    const query: any = {};
+
+    if (user.role !== UserRole.SUPER_ADMIN) {
+      query.tenantId = user.tenantId!;
+    }
+
     if (user.role === UserRole.WAREHOUSE_MANAGER || user.role === UserRole.INVENTORY_CLERK) {
       if (!user.warehouseId) return [];
       query.id = user.warehouseId;
@@ -39,12 +43,21 @@ export class WarehousesService {
     return this.warehouseMapper.toResponseList(warehouses);
   }
 
+  async findAllByTenant(tenantId: string): Promise<WarehouseResponseDto[]> {
+    const warehouses = await this.warehouseRepository.find({ where: { tenantId } });
+    return this.warehouseMapper.toResponseList(warehouses);
+  }
+
   async findOne(user: UserResponseDto, id: string): Promise<WarehouseResponseDto> {
     if ((user.role === UserRole.WAREHOUSE_MANAGER || user.role === UserRole.INVENTORY_CLERK) && user.warehouseId !== id) {
       throw new NotFoundException({ message: 'The specified warehouse could not be found.', code: 'WAREHOUSE_NOT_FOUND' });
     }
 
-    const warehouse = await this.warehouseRepository.findOne({ where: { id, tenantId: user.tenantId! } });
+    const query: any = { id };
+    if (user.role !== UserRole.SUPER_ADMIN) {
+      query.tenantId = user.tenantId!;
+    }
+    const warehouse = await this.warehouseRepository.findOne({ where: query });
     if (!warehouse) {
       throw new NotFoundException({ message: 'The specified warehouse could not be found.', code: 'WAREHOUSE_NOT_FOUND' });
     }

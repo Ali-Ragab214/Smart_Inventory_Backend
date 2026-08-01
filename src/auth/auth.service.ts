@@ -59,7 +59,13 @@ export class AuthService {
       throw new UnauthorizedException({ message: 'The email or password you entered is incorrect.', code: 'INVALID_CREDENTIALS' });
     }
 
-    const payload = { sub: user.id, username: user.username, role: user.role, tenantId: user.tenantId };
+    const payload = {
+      sub: user.id,
+      username: user.username,
+      role: user.role,
+      tenantId: user.tenantId,
+      warehouseId: user.warehouseId,
+    };
     const userDto = await this.usersService.findById(null, user.id);
     return {
       user: userDto,
@@ -69,7 +75,13 @@ export class AuthService {
 
   async signup(createUserDto: CreateUserDto): Promise<any> {
     const user = await this.usersService.create(null, createUserDto);
-    const payload = { sub: user.id, username: user.username, role: user.role, tenantId: user.tenantId };
+    const payload = {
+      sub: user.id,
+      username: user.username,
+      role: user.role,
+      tenantId: user.tenantId,
+      warehouseId: user.warehouseId,
+    };
     return {
       user,
       access_token: await this.jwtService.signAsync(payload),

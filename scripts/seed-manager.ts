@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { DataSource } from 'typeorm';
 import { User, UserRole } from '../src/users/entities/user.entity';
+import { Tenant } from '../src/tenants/entities/tenant.entity';
 import { Warehouse, WarehouseStatus } from '../src/warehouses/entities/warehouse.entity';
 import { Category } from '../src/categories/entities/category.entity';
 import { Sku } from '../src/sku/entities/sku.entity';
@@ -10,22 +11,32 @@ import { StockLevel } from '../src/inventory/stock-levels/entities/stock-level.e
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(AppModule);
   const dataSource = app.get(DataSource);
-  
-  // Create Tenant Owner
-  const tenantRepo = dataSource.getRepository(User);
-  let tenant = await tenantRepo.findOne({ where: { role: UserRole.TENANT_OWNER } });
+
+  // Create Tenant
+  const tenantRepo = dataSource.getRepository(Tenant);
+  let tenant = await tenantRepo.findOne({ where: { name: 'Test Tenant' } });
   if (!tenant) {
-    tenant = tenantRepo.create({
+    tenant = tenantRepo.create({ name: 'Test Tenant' });
+    await tenantRepo.save(tenant);
+  }
+
+  // Create Tenant Owner
+  const userRepo = dataSource.getRepository(User);
+  let owner = await userRepo.findOne({ where: { email: 'tenant@example.com' } });
+  if (!owner) {
+    owner = userRepo.create({
       name: 'Test Tenant',
       email: 'tenant@example.com',
       username: 'tenant',
       passwordHash: 'Password@123',
       role: UserRole.TENANT_OWNER,
+      tenantId: tenant.id,
     });
-    await tenantRepo.save(tenant);
+    await userRepo.save(owner);
   } else {
-    tenant.passwordHash = 'Password@123';
-    await tenantRepo.save(tenant);
+    owner.passwordHash = 'Password@123';
+    owner.tenantId = tenant.id;
+    await userRepo.save(owner);
   }
 
   // Create Warehouse
@@ -43,28 +54,30 @@ async function bootstrap() {
   }
 
   // Create Warehouse Manager
-  let manager = await tenantRepo.findOne({ where: { email: 'manager@example.com' } });
+  let manager = await userRepo.findOne({ where: { email: 'manager@example.com' } });
   if (!manager) {
-    manager = tenantRepo.create({
+    manager = userRepo.create({
       name: 'Test Manager',
       email: 'manager@example.com',
       username: 'manager',
       passwordHash: 'Password@123',
       role: UserRole.WAREHOUSE_MANAGER,
       warehouseId: warehouse.id,
+      tenantId: tenant.id,
     });
-    await tenantRepo.save(manager);
+    await userRepo.save(manager);
   } else {
     manager.warehouseId = warehouse.id;
+    manager.tenantId = tenant.id;
     manager.passwordHash = 'Password@123';
-    await tenantRepo.save(manager);
+    await userRepo.save(manager);
   }
 
   // Create Category
   const categoryRepo = dataSource.getRepository(Category);
   let category = await categoryRepo.findOne({ where: { name: 'Test Category' } });
   if (!category) {
-    category = categoryRepo.create({ name: 'Test Category' });
+    category = categoryRepo.create({ name: 'Test Category', tenantId: tenant.id });
     await categoryRepo.save(category);
   }
 
@@ -78,6 +91,7 @@ async function bootstrap() {
       categoryId: category.id,
       price: 15,
       cost: 10,
+      tenantId: tenant.id,
     });
     await skuRepo.save(sku);
   }
@@ -92,6 +106,7 @@ async function bootstrap() {
       quantity: 5,
       reorderThreshold: 10,
       safetyStock: 2,
+      tenantId: tenant.id,
     });
     await stockLevelRepo.save(stockLevel);
   } else {
@@ -101,11 +116,11 @@ async function bootstrap() {
   }
 
   console.log('Seed completed successfully');
-  console.log(`Tenant Owner: ${tenant.email} (password: password)`);
-  console.log(`Manager: ${manager.email} (password: password)`);
+  console.log(`Tenant Owner: ${owner.email} (password: Password@123)`);
+  console.log(`Manager: ${manager.email} (password: Password@123)`);
   console.log(`Warehouse: ${warehouse.name}`);
   console.log(`Low stock product: ${sku.name} (Qty: 5, Threshold: 10)`);
-  
+
   await app.close();
 }
 bootstrap();
