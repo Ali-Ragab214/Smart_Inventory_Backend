@@ -25,31 +25,33 @@ export class VendorsService {
     private readonly vendorMapper: VendorMapper,
   ) {}
 
-  async create(dto: CreateVendorDto): Promise<VendorResponseDto> {
+  async create(tenantId: string, dto: CreateVendorDto): Promise<VendorResponseDto> {
     const vendor = this.vendorMapper.toEntity(dto);
+    vendor.tenantId = tenantId;
     const saved = await this.vendorRepository.save(vendor);
     return this.vendorMapper.toResponse(saved);
   }
 
-  async findAll(query: VendorQueryDto): Promise<{ data: VendorResponseDto[]; total: number }> {
-    const qb = this.vendorRepository.createQueryBuilder('vendor');
+  async findAll(tenantId: string, query: VendorQueryDto): Promise<{ data: VendorResponseDto[]; total: number }> {
+    const qb = this.vendorRepository.createQueryBuilder('vendor')
+      .where('vendor.tenantId = :tenantId', { tenantId });
     applySortAndSearch(qb, 'vendor', query.sortBy, query.sortOrder, query.search, ['name', 'contactEmail']);
     const result = await paginate(qb, query.page!, query.limit!);
     return { data: this.vendorMapper.toResponseList(result.data), total: result.total };
   }
 
-  async findOne(id: string): Promise<VendorResponseDto> {
-    const vendor = await this.vendorRepository.findOne({ where: { id } });
+  async findOne(tenantId: string, id: string): Promise<VendorResponseDto> {
+    const vendor = await this.vendorRepository.findOne({ where: { id, tenantId } });
     if (!vendor) {
-      throw new NotFoundException(`Vendor with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified vendor could not be found.', code: 'VENDOR_NOT_FOUND' });
     }
     return this.vendorMapper.toResponse(vendor);
   }
 
-  async update(id: string, dto: UpdateVendorDto): Promise<VendorResponseDto> {
-    const vendor = await this.vendorRepository.findOne({ where: { id } });
+  async update(tenantId: string, id: string, dto: UpdateVendorDto): Promise<VendorResponseDto> {
+    const vendor = await this.vendorRepository.findOne({ where: { id, tenantId } });
     if (!vendor) {
-      throw new NotFoundException(`Vendor with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified vendor could not be found.', code: 'VENDOR_NOT_FOUND' });
     }
 
     const updated = this.vendorMapper.updateEntity(vendor, dto);
@@ -57,19 +59,20 @@ export class VendorsService {
     return this.vendorMapper.toResponse(saved);
   }
 
-  async remove(id: string): Promise<void> {
-    const vendor = await this.vendorRepository.findOne({ where: { id } });
+  async remove(tenantId: string, id: string): Promise<void> {
+    const vendor = await this.vendorRepository.findOne({ where: { id, tenantId } });
     if (!vendor) {
-      throw new NotFoundException(`Vendor with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified vendor could not be found.', code: 'VENDOR_NOT_FOUND' });
     }
     await this.vendorRepository.softRemove(vendor);
   }
 
-  async findVendorsForSku(skuId: string) {
+  async findVendorsForSku(tenantId: string, skuId: string) {
     const entries = await this.catalogEntryRepo
       .createQueryBuilder('ce')
       .leftJoinAndSelect('ce.vendor', 'vendor')
       .where('ce.skuId = :skuId', { skuId })
+      .andWhere('ce.tenantId = :tenantId', { tenantId })
       .orderBy('ce.price', 'ASC')
       .getMany();
 
@@ -81,18 +84,17 @@ export class VendorsService {
     }));
   }
 
-  async getVendorCatalogEntry(vendorId: string, skuId: string) {
+  async getVendorCatalogEntry(tenantId: string, vendorId: string, skuId: string) {
     const entry = await this.catalogEntryRepo
       .createQueryBuilder('ce')
       .leftJoinAndSelect('ce.vendor', 'vendor')
       .where('ce.vendorId = :vendorId', { vendorId })
       .andWhere('ce.skuId = :skuId', { skuId })
+      .andWhere('ce.tenantId = :tenantId', { tenantId })
       .getOne();
 
     if (!entry) {
-      throw new NotFoundException(
-        `Catalog entry not found for vendor "${vendorId}" and SKU "${skuId}"`,
-      );
+      throw new NotFoundException({ message: "We couldn't find a catalog entry for this product and vendor combination.", code: 'CATALOG_ENTRY_NOT_FOUND' });
     }
 
     return {

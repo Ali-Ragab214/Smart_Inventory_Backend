@@ -1,11 +1,11 @@
 import { Column, Entity, Index, ManyToOne, JoinColumn, Unique } from 'typeorm';
-import { AbstractEntity } from '../../../shared/base.entity';
+import { AbstractTenantEntity } from '../../../shared/tenant.entity';
 import { Sku } from '../../../sku/entities/sku.entity';
 import { Warehouse } from '../../../warehouses/entities/warehouse.entity';
 
 @Unique('uq_stock_levels_sku_warehouse', ['skuId', 'warehouseId'])
 @Entity('stock_levels')
-export class StockLevel extends AbstractEntity {
+export class StockLevel extends AbstractTenantEntity {
   @ManyToOne(() => Sku, { onDelete: 'RESTRICT', nullable: false })
   @JoinColumn({ name: 'sku_id' })
   sku!: Sku;

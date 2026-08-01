@@ -1,10 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { BadRequestException } from '@nestjs/common';
 import { SkuService } from './sku.service';
 import { Sku } from './entities/sku.entity';
 import { SkuMapper } from './mappers/sku.mapper';
+import { StockLevelsService } from '../inventory/stock-levels/stock-levels.service';
 
 describe('SkuService', () => {
   let service: SkuService;
@@ -43,6 +44,18 @@ describe('SkuService', () => {
         {
           provide: getRepositoryToken(Sku),
           useValue: mockRepository,
+        },
+        {
+          provide: StockLevelsService,
+          useValue: { autoInitializeForSku: jest.fn(), autoInitializeForSkus: jest.fn() },
+        },
+        {
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn().mockImplementation(async (cb) => {
+              return cb(mockQueryRunner.manager);
+            }),
+          },
         },
       ],
     }).compile();
@@ -106,9 +119,9 @@ SKU001,,1000,1300
       expect(result.successful).toBe(0);
       expect(result.failed).toBe(2);
       expect(result.errors).toHaveLength(2);
-      expect(result.errors[0].row).toBe(1);
+      expect(result.errors[0].row).toBe(2);
       expect(result.errors[0].message).toContain('name');
-      expect(result.errors[1].row).toBe(2);
+      expect(result.errors[1].row).toBe(3);
       expect(result.errors[1].message).toContain('skuCode');
     });
 
@@ -122,9 +135,9 @@ SKU002,Mouse,20,-35`;
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(0);
       expect(result.failed).toBe(2);
-      expect(result.errors[0].row).toBe(1);
+      expect(result.errors[0].row).toBe(2);
       expect(result.errors[0].skuCode).toBe('SKU001');
-      expect(result.errors[1].row).toBe(2);
+      expect(result.errors[1].row).toBe(3);
       expect(result.errors[1].skuCode).toBe('SKU002');
     });
 
@@ -141,7 +154,7 @@ SKU001,Laptop Duplicate,1000,1300`;
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(1);
       expect(result.failed).toBe(1);
-      expect(result.errors[0].row).toBe(2);
+      expect(result.errors[0].row).toBe(3);
       expect(result.errors[0].skuCode).toBe('SKU001');
       expect(result.errors[0].message).toContain('Duplicate SKU code "SKU001" found in CSV file');
     });
@@ -151,7 +164,7 @@ SKU001,Laptop Duplicate,1000,1300`;
 SKU001,Laptop,1000,1300
 SKU002,Mouse,20,35`;
 
-      mockRepository.find.mockResolvedValue([{ skuCode: 'SKU001' }]);
+      mockRepository.find.mockResolvedValue([{ sku: 'SKU001' }]);
       mockQueryRunner.manager.save.mockResolvedValue([]);
 
       const result = await service.importCsv(Buffer.from(csvData));
@@ -159,7 +172,7 @@ SKU002,Mouse,20,35`;
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(1);
       expect(result.failed).toBe(1);
-      expect(result.errors[0].row).toBe(1);
+      expect(result.errors[0].row).toBe(2);
       expect(result.errors[0].skuCode).toBe('SKU001');
       expect(result.errors[0].message).toBe('SKU code "SKU001" already exists');
     });

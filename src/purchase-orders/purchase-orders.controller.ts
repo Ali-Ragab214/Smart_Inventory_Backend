@@ -9,6 +9,8 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { TransitionDto } from './dto/transition.dto';
@@ -21,20 +23,20 @@ export class PurchaseOrdersController {
   constructor(private readonly service: PurchaseOrdersService) {}
 
   @Post()
-  async create(@Body() dto: CreatePurchaseOrderDto) {
-    const data = await this.service.create(dto);
+  async create(@Body() dto: CreatePurchaseOrderDto, @CurrentUser() user: UserResponseDto) {
+    const data = await this.service.create(user.tenantId!, dto);
     return successResponse(data);
   }
 
   @Get()
-  async findAll(@Query() query: PurchaseOrderQueryDto) {
-    const { data, total } = await this.service.findAll(query);
+  async findAll(@Query() query: PurchaseOrderQueryDto, @CurrentUser() user: UserResponseDto) {
+    const { data, total } = await this.service.findAll(user.tenantId!, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
-    const data = await this.service.findOne(id);
+  async findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {
+    const data = await this.service.findOne(user.tenantId!, id);
     return successResponse(data);
   }
 
@@ -43,8 +45,9 @@ export class PurchaseOrdersController {
   async transition(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: TransitionDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.service.transition(id, dto.status);
+    const data = await this.service.transition(user.tenantId!, id, dto.status);
     return successResponse(data);
   }
 }

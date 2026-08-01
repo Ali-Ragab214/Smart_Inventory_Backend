@@ -56,16 +56,17 @@ export class AuthService {
     user ??= await this.usersService.findByUsernameForAuth(usernameOrEmail);
 
     if (!user || !(await user.comparePassword(password))) {
-      throw new UnauthorizedException("Invalid email or password");
+      throw new UnauthorizedException({ message: 'The email or password you entered is incorrect.', code: 'INVALID_CREDENTIALS' });
     }
 
     const payload = {
       sub: user.id,
       username: user.username,
       role: user.role,
+      tenantId: user.tenantId,
       warehouseId: user.warehouseId,
     };
-    const userDto = await this.usersService.findById(user.id);
+    const userDto = await this.usersService.findById(null, user.id);
     return {
       user: userDto,
       access_token: await this.jwtService.signAsync(payload),
@@ -73,11 +74,12 @@ export class AuthService {
   }
 
   async signup(createUserDto: CreateUserDto): Promise<any> {
-    const user = await this.usersService.create(createUserDto);
+    const user = await this.usersService.create(null, createUserDto);
     const payload = {
       sub: user.id,
       username: user.username,
       role: user.role,
+      tenantId: user.tenantId,
       warehouseId: user.warehouseId,
     };
     return {

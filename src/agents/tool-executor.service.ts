@@ -79,31 +79,32 @@ export class ToolExecutorService implements IToolExecutor {
     private readonly vendorsService: VendorsService,
   ) {}
 
-  async execute(toolName: string, input: Record<string, unknown>): Promise<unknown> {
+  async execute(tenantId: string, toolName: string, input: Record<string, unknown>): Promise<unknown> {
     switch (toolName) {
       case 'get_sku':
-        return this.inventoryService.findSku(input.skuId as string);
+        return this.inventoryService.findSku(tenantId, input.skuId as string);
 
       case 'get_low_stock_skus':
-        return this.inventoryService.findLowStock();
+        return this.inventoryService.findLowStock(tenantId);
 
       case 'get_movement_history':
-        return this.inventoryService.getMovementHistory(input.skuId as string);
+        return this.inventoryService.getMovementHistory(tenantId, input.skuId as string);
 
       case 'get_vendor':
-        return this.vendorsService.findOne(input.vendorId as string);
+        return this.vendorsService.findOne(tenantId, input.vendorId as string);
 
       case 'get_vendors_for_sku':
-        return this.vendorsService.findVendorsForSku(input.skuId as string);
+        return this.vendorsService.findVendorsForSku(tenantId, input.skuId as string);
 
       case 'get_vendor_catalog_entry':
         return this.vendorsService.getVendorCatalogEntry(
+          tenantId,
           input.vendorId as string,
           input.skuId as string,
         );
 
       case 'get_all_vendors': {
-        const { data } = await this.vendorsService.findAll({
+        const { data } = await this.vendorsService.findAll(tenantId, {
           page: 1,
           limit: 100,
         });
@@ -111,7 +112,7 @@ export class ToolExecutorService implements IToolExecutor {
       }
 
       default:
-        throw new BadRequestException(`Unknown tool: ${toolName}`);
+        throw new BadRequestException({ message: 'An internal error occurred: unrecognized tool requested.', code: 'UNKNOWN_TOOL' });
     }
   }
 }

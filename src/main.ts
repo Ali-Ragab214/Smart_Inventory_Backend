@@ -35,7 +35,7 @@ async function bootstrap() {
   app.useGlobalGuards(new JwtAuthGuard(app.get('Reflector')), new RolesGuard(app.get('Reflector')));
 
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: true,
     credentials: true,
   });
 

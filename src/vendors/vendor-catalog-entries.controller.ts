@@ -11,6 +11,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 import {
   ApiBadRequestResponse,
   ApiCreatedResponse,
@@ -44,8 +46,9 @@ export class VendorCatalogEntriesController {
   async create(
     @Param('vendorId', ParseUUIDPipe) vendorId: string,
     @Body() dto: CreateVendorCatalogEntryDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.catalogService.create(vendorId, dto);
+    const data = await this.catalogService.create(user.tenantId!, vendorId, dto);
     return successResponse(data);
   }
 
@@ -56,8 +59,9 @@ export class VendorCatalogEntriesController {
   async findAll(
     @Param('vendorId', ParseUUIDPipe) vendorId: string,
     @Query() query: VendorCatalogEntryQueryDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const { data, total } = await this.catalogService.findAll(vendorId, query);
+    const { data, total } = await this.catalogService.findAll(user.tenantId!, vendorId, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
@@ -70,8 +74,9 @@ export class VendorCatalogEntriesController {
   async findOne(
     @Param('vendorId', ParseUUIDPipe) vendorId: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.catalogService.findOne(vendorId, id);
+    const data = await this.catalogService.findOne(user.tenantId!, vendorId, id);
     return successResponse(data);
   }
 
@@ -86,8 +91,9 @@ export class VendorCatalogEntriesController {
     @Param('vendorId', ParseUUIDPipe) vendorId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateVendorCatalogEntryDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.catalogService.update(vendorId, id, dto);
+    const data = await this.catalogService.update(user.tenantId!, vendorId, id, dto);
     return successResponse(data);
   }
 
@@ -101,8 +107,9 @@ export class VendorCatalogEntriesController {
   async remove(
     @Param('vendorId', ParseUUIDPipe) vendorId: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    await this.catalogService.remove(vendorId, id);
+    await this.catalogService.remove(user.tenantId!, vendorId, id);
     return successResponse(null);
   }
 }

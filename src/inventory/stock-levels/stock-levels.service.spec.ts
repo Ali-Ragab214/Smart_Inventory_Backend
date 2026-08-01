@@ -3,6 +3,9 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { StockLevelsService } from './stock-levels.service';
 import { StockLevel } from './entities/stock-level.entity';
+import { Sku } from '../../sku/entities/sku.entity';
+import { Warehouse } from '../../warehouses/entities/warehouse.entity';
+import { DataSource } from 'typeorm';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -58,6 +61,16 @@ describe('StockLevelsService', () => {
       providers: [
         StockLevelsService,
         { provide: getRepositoryToken(StockLevel), useValue: mockRepo },
+        { provide: getRepositoryToken(Sku), useValue: mockRepo },
+        { provide: getRepositoryToken(Warehouse), useValue: mockRepo },
+        {
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn().mockImplementation(async (cb) => {
+              return cb();
+            }),
+          },
+        },
       ],
     }).compile();
 
@@ -68,15 +81,15 @@ describe('StockLevelsService', () => {
     expect(service).toBeDefined();
   });
 
-  // ── findAll ──────────────────────────────────────────────────────────────
+  // ── findByWarehouse ──────────────────────────────────────────────────────────────
 
-  describe('findAll', () => {
+  describe('findByWarehouse', () => {
     it('should return paginated list mapped to response DTOs', async () => {
       const level = makeStockLevel();
       const qb = makeQueryBuilder([level], 1);
       mockRepo.createQueryBuilder.mockReturnValue(qb);
 
-      const result = await service.findAll({ page: 1, limit: 20 });
+      const result = await service.findByWarehouse('wh-uuid', { page: 1, limit: 20 });
 
       expect(result.total).toBe(1);
       expect(result.data).toHaveLength(1);
@@ -89,7 +102,7 @@ describe('StockLevelsService', () => {
       const qb = makeQueryBuilder([], 0);
       mockRepo.createQueryBuilder.mockReturnValue(qb);
 
-      await service.findAll({ page: 1, limit: 20, skuId: 'sku-uuid' });
+      await service.findByWarehouse('wh-uuid', { page: 1, limit: 20, skuId: 'sku-uuid' });
 
       expect(qb.andWhere).toHaveBeenCalledWith('sl.skuId = :skuId', {
         skuId: 'sku-uuid',
@@ -100,12 +113,11 @@ describe('StockLevelsService', () => {
       const qb = makeQueryBuilder([], 0);
       mockRepo.createQueryBuilder.mockReturnValue(qb);
 
-      await service.findAll({ page: 1, limit: 20, warehouseId: 'wh-uuid' });
+      await service.findByWarehouse('wh-uuid', { page: 1, limit: 20 });
 
-      expect(qb.andWhere).toHaveBeenCalledWith(
-        'sl.warehouseId = :warehouseId',
-        { warehouseId: 'wh-uuid' },
-      );
+      expect(qb.where).toHaveBeenCalledWith('sl.warehouseId = :warehouseId', {
+        warehouseId: 'wh-uuid',
+      });
     });
   });
 

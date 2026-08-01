@@ -19,8 +19,9 @@ export class ApprovalQueueService {
     private readonly agentRunService: AgentRunService,
   ) {}
 
-  async create(data: CreateApprovalRequestDto): Promise<ApprovalRequestResponseDto> {
+  async create(tenantId: string, data: CreateApprovalRequestDto): Promise<ApprovalRequestResponseDto> {
     const approval = this.approvalRepo.create({
+      tenantId,
       agentRunId: data.agentRunId,
       agentType: data.agentType,
       stepNumber: data.stepNumber,
@@ -36,11 +37,13 @@ export class ApprovalQueueService {
   }
 
   async findPending(
+    tenantId: string,
     query: ApprovalQueryDto,
   ): Promise<{ data: ApprovalRequestResponseDto[]; total: number }> {
     const qb = this.approvalRepo
       .createQueryBuilder('approval')
       .where('approval.status = :status', { status: 'pending' })
+      .andWhere('approval.tenantId = :tenantId', { tenantId })
       .orderBy('approval.createdAt', 'DESC');
 
     if (query.agentType) {
@@ -57,13 +60,14 @@ export class ApprovalQueueService {
   }
 
   async approve(
+    tenantId: string,
     id: string,
     reviewedBy: string,
     editedPayload?: object,
   ): Promise<ApprovalRequestResponseDto> {
-    const approval = await this.approvalRepo.findOne({ where: { id } });
+    const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
-      throw new NotFoundException(`Approval request with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
     }
 
     approval.status = 'approved';
@@ -81,19 +85,20 @@ export class ApprovalQueueService {
   }
 
   async reject(
+    tenantId: string,
     id: string,
     reviewedBy: string,
   ): Promise<ApprovalRequestResponseDto> {
-    const approval = await this.approvalRepo.findOne({ where: { id } });
+    const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
-      throw new NotFoundException(`Approval request with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
     }
 
     approval.status = 'rejected';
     approval.reviewedBy = reviewedBy;
     approval.reviewedAt = new Date();
     const saved = await this.approvalRepo.save(approval);
-    await this.agentRunService.updateStatus(approval.agentRunId, 'rejected');
+    await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'rejected');
     return this.mapper.toResponse(saved);
   }
 }

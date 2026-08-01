@@ -18,9 +18,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: { sub: string; username: string }) {
-    const user = await this.usersService.findById(payload.sub);
+    const user = await this.usersService.findById(null, payload.sub);
     if (!user) {
-      throw new UnauthorizedException("User not found");
+      throw new UnauthorizedException({ message: 'Authentication failed. We could not verify your account.', code: 'AUTH_USER_NOT_FOUND' });
     }
     return user;
   }

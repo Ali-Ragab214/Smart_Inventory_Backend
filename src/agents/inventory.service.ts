@@ -11,16 +11,16 @@ export class InventoryService {
     private readonly stockMovementService: StockMovementService,
   ) {}
 
-  async findSku(skuId: string) {
-    return this.skuService.findOne(skuId);
+  async findSku(tenantId: string, skuId: string) {
+    return this.skuService.findOne(tenantId, skuId);
   }
 
-  async findLowStock() {
-    return this.stockLevelsService.findLowStock();
+  async findLowStock(tenantId: string) {
+    return this.stockLevelsService.findLowStock(tenantId);
   }
 
-  async getMovementHistory(skuId: string) {
-    const { data } = await this.stockMovementService.getHistoryForSku(skuId, {
+  async getMovementHistory(tenantId: string, skuId: string) {
+    const { data } = await this.stockMovementService.getHistoryForSku(tenantId, skuId, {
       page: 1,
       limit: 50,
     });

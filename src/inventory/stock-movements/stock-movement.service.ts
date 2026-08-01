@@ -76,6 +76,7 @@ export class StockMovementService {
    * 4. Non-negative  — rejects any movement that would drop stock below zero.
    */
   async recordMovement(
+    tenantId: string,
     params: RecordMovementParams,
   ): Promise<StockMovementResponseDto> {
     return this.dataSource.transaction(async (manager) => {
@@ -84,7 +85,7 @@ export class StockMovementService {
 
       // Step 1: Idempotency check
       const existing = await movRepo.findOne({
-        where: { idempotencyKey: params.idempotencyKey },
+        where: { idempotencyKey: params.idempotencyKey, tenantId },
       });
       if (existing) {
         return this.mapper.toResponse(existing);
@@ -92,7 +93,7 @@ export class StockMovementService {
 
       // Step 2: Lock the StockLevel row
       let stockLevel = await slRepo.findOne({
-        where: { skuId: params.skuId, warehouseId: params.warehouseId },
+        where: { skuId: params.skuId, warehouseId: params.warehouseId, tenantId },
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -101,6 +102,7 @@ export class StockMovementService {
         stockLevel = slRepo.create({
           skuId: params.skuId,
           warehouseId: params.warehouseId,
+          tenantId,
           quantity: 0,
           reorderThreshold: 0,
           safetyStock: 0,
@@ -113,15 +115,14 @@ export class StockMovementService {
 
       // Step 5: Guard against negative stock
       if (newBalance < 0) {
-        throw new BadRequestException(
-          `Movement would result in negative stock (current: ${stockLevel.quantity}, change: ${params.quantityChange}).`,
-        );
+        throw new BadRequestException({ message: `Movement would result in negative stock (current: ${stockLevel.quantity}, change: ${params.quantityChange}).`, code: 'INSUFFICIENT_STOCK' });
       }
 
       // Step 6: Insert the ledger row
       const movement = movRepo.create({
         skuId: params.skuId,
         warehouseId: params.warehouseId,
+        tenantId,
         reason: params.reason,
         quantityChange: params.quantityChange,
         balanceAfter: newBalance,
@@ -149,12 +150,14 @@ export class StockMovementService {
    * Returns the most recent movements, optionally filtered by warehouse.
    */
   async getRecentMovements(
+    tenantId: string,
     warehouseId?: string,
     limit: number = 10,
   ): Promise<StockMovementResponseDto[]> {
     const qb = this.movementRepo
       .createQueryBuilder('sm')
       .leftJoinAndSelect('sm.sku', 'sku')
+      .where('sm.tenantId = :tenantId', { tenantId })
       .orderBy('sm.createdAt', 'DESC');
 
     if (warehouseId) {
@@ -172,12 +175,14 @@ export class StockMovementService {
    * Filterable by date range and movement reason.
    */
   async getHistoryForSku(
+    tenantId: string,
     skuId: string,
     query: StockMovementQueryDto,
   ): Promise<{ data: StockMovementResponseDto[]; total: number }> {
     const qb = this.movementRepo
       .createQueryBuilder('sm')
       .where('sm.skuId = :skuId', { skuId })
+      .andWhere('sm.tenantId = :tenantId', { tenantId })
       .orderBy('sm.createdAt', 'DESC');
 
     if (query.from) {
@@ -203,14 +208,12 @@ export class StockMovementService {
    *
    * NOT on the hot path — call manually / from an admin job.
    */
-  async reconcileBalance(skuId: string, warehouseId: string): Promise<ReconciliationResult> {
+  async reconcileBalance(tenantId: string, skuId: string, warehouseId: string): Promise<ReconciliationResult> {
     const stockLevel = await this.stockLevelRepo.findOne({
-      where: { skuId, warehouseId },
+      where: { skuId, warehouseId, tenantId },
     });
     if (!stockLevel) {
-      throw new NotFoundException(
-        `Stock level not found for SKU "${skuId}" in warehouse "${warehouseId}"`,
-      );
+      throw new NotFoundException({ message: "We couldn't find the stock level information for this item.", code: 'STOCK_LEVEL_NOT_FOUND' });
     }
 
     const result = await this.movementRepo
@@ -218,6 +221,7 @@ export class StockMovementService {
       .select('COALESCE(SUM(sm.quantityChange), 0)', 'total')
       .where('sm.skuId = :skuId', { skuId })
       .andWhere('sm.warehouseId = :warehouseId', { warehouseId })
+      .andWhere('sm.tenantId = :tenantId', { tenantId })
       .getRawOne<{ total: string }>();
 
     const calculated = parseInt(result?.total ?? '0', 10);
@@ -233,7 +237,7 @@ export class StockMovementService {
 
   //  Transfer between warehouses
 
-  async transfer(params: {
+  async transfer(tenantId: string, params: {
     skuId: string;
     fromWarehouseId: string;
     toWarehouseId: string;
@@ -243,10 +247,10 @@ export class StockMovementService {
     note?: string;
   }): Promise<{ out: StockMovementResponseDto; in: StockMovementResponseDto }> {
     if (params.fromWarehouseId === params.toWarehouseId) {
-      throw new BadRequestException('Source and destination warehouses must be different');
+      throw new BadRequestException({ message: 'You cannot transfer stock to the same warehouse.', code: 'SAME_SOURCE_DEST_WAREHOUSE' });
     }
     if (params.quantity <= 0) {
-      throw new BadRequestException('Transfer quantity must be positive');
+      throw new BadRequestException({ message: 'The transfer quantity must be greater than zero.', code: 'INVALID_TRANSFER_QUANTITY' });
     }
 
     return this.dataSource.transaction(async (manager) => {
@@ -254,12 +258,12 @@ export class StockMovementService {
       const slRepo = manager.getRepository(StockLevel);
 
       const existing = await movRepo.findOne({
-        where: { idempotencyKey: params.idempotencyKey },
+        where: { idempotencyKey: params.idempotencyKey, tenantId },
       });
       if (existing) {
         const partnerKey = `${params.idempotencyKey}-partner`;
         const partner = await movRepo.findOne({
-          where: { idempotencyKey: partnerKey },
+          where: { idempotencyKey: partnerKey, tenantId },
         });
         const out = this.mapper.toResponse(existing);
         const inbound = partner ? this.mapper.toResponse(partner) : null as any;
@@ -271,23 +275,22 @@ export class StockMovementService {
 
       // Lock both stock levels
       let sourceSl = await slRepo.findOne({
-        where: { skuId: params.skuId, warehouseId: params.fromWarehouseId },
+        where: { skuId: params.skuId, warehouseId: params.fromWarehouseId, tenantId },
         lock: { mode: 'pessimistic_write' },
       });
       if (!sourceSl) {
-        throw new NotFoundException(
-          `No stock level for SKU "${params.skuId}" in source warehouse "${params.fromWarehouseId}"`,
-        );
+        throw new NotFoundException({ message: "We couldn't find the stock level information for this item in the source warehouse.", code: 'STOCK_LEVEL_NOT_FOUND' });
       }
 
       let destSl = await slRepo.findOne({
-        where: { skuId: params.skuId, warehouseId: params.toWarehouseId },
+        where: { skuId: params.skuId, warehouseId: params.toWarehouseId, tenantId },
         lock: { mode: 'pessimistic_write' },
       });
       if (!destSl) {
         destSl = slRepo.create({
           skuId: params.skuId,
           warehouseId: params.toWarehouseId,
+          tenantId,
           quantity: 0,
           reorderThreshold: 0,
           safetyStock: 0,
@@ -297,9 +300,7 @@ export class StockMovementService {
 
       const newSourceBalance = sourceSl.quantity - params.quantity;
       if (newSourceBalance < 0) {
-        throw new BadRequestException(
-          `Insufficient stock in source warehouse (available: ${sourceSl.quantity}, transfer: ${params.quantity})`,
-        );
+        throw new BadRequestException({ message: `Insufficient stock in source warehouse (available: ${sourceSl.quantity}, transfer: ${params.quantity})`, code: 'INSUFFICIENT_STOCK' });
       }
       const newDestBalance = destSl.quantity + params.quantity;
 
@@ -307,6 +308,7 @@ export class StockMovementService {
       const outMovement = movRepo.create({
         skuId: params.skuId,
         warehouseId: params.fromWarehouseId,
+        tenantId,
         reason: MovementReason.TRANSFER_OUT,
         quantityChange: -params.quantity,
         balanceAfter: newSourceBalance,
@@ -320,6 +322,7 @@ export class StockMovementService {
       const inMovement = movRepo.create({
         skuId: params.skuId,
         warehouseId: params.toWarehouseId,
+        tenantId,
         reason: MovementReason.TRANSFER_IN,
         quantityChange: params.quantity,
         balanceAfter: newDestBalance,
@@ -355,6 +358,7 @@ export class StockMovementService {
    * a time-series model.
    */
   async getConsumptionSeries(
+    tenantId: string,
     skuId: string,
     warehouseId: string,
     sinceDays: number,
@@ -365,6 +369,7 @@ export class StockMovementService {
       .addSelect('SUM(sm.quantityChange)', 'netChange')
       .where('sm.skuId = :skuId', { skuId })
       .andWhere('sm.warehouseId = :warehouseId', { warehouseId })
+      .andWhere('sm.tenantId = :tenantId', { tenantId })
       .andWhere(
         "sm.createdAt >= NOW() - (:sinceDays * INTERVAL '1 day')",
         { sinceDays },
