@@ -88,9 +88,7 @@ export class UsersService {
    * Return all active (non-deleted) users scoped to tenant.
    */
   async findAll(currentUser: UserResponseDto, query: PaginationQueryDto): Promise<{ data: UserResponseDto[]; total: number }> {
-    const qb = this.userRepository
-      .createQueryBuilder('user')
-      .where('user.isActive = :isActive', { isActive: true });
+    const qb = this.userRepository.createQueryBuilder('user');
 
     if (currentUser.role !== UserRole.SUPER_ADMIN) {
       qb.andWhere('user.tenantId = :tenantId', { tenantId: currentUser.tenantId });
@@ -222,7 +220,8 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException({ message: "We couldn't find this user's account.", code: 'USER_NOT_FOUND' });
     }
-    await this.userRepository.softRemove(user);
-    this.logger.log(`User soft-deleted: ${id}`);
+    user.isActive = false;
+    await this.userRepository.save(user);
+    this.logger.log(`User deactivated: ${id}`);
   }
 }

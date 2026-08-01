@@ -11,6 +11,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
+import { Roles } from '../auth/roles.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import {
   ApiBadRequestResponse,
@@ -66,10 +67,11 @@ export class WarehousesController {
   @ApiBadRequestResponse({ description: 'Invalid request body' })
   @ApiNotFoundResponse({ description: 'Warehouse not found' })
   async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateWarehouseDto, @CurrentUser() user: UserResponseDto) {
-    const data = await this.warehousesService.update(user.tenantId!, id, dto);
+    const data = await this.warehousesService.update(user, id, dto);
     return successResponse(data);
   }
 
+  @Roles('super_admin', 'tenant_owner')
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a warehouse' })
@@ -77,7 +79,7 @@ export class WarehousesController {
   @ApiOkResponse({ description: 'Warehouse deleted successfully' })
   @ApiNotFoundResponse({ description: 'Warehouse not found' })
   async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {
-    await this.warehousesService.remove(user.tenantId!, id);
+    await this.warehousesService.remove(user, id);
     return successResponse(null);
   }
 }
