@@ -59,6 +59,10 @@ export class AuthService {
       throw new UnauthorizedException({ message: 'The email or password you entered is incorrect.', code: 'INVALID_CREDENTIALS' });
     }
 
+    if (!user.isActive) {
+      throw new UnauthorizedException({ message: 'Please return to your manager to reactive your email.', code: 'USER_INACTIVE' });
+    }
+
     const payload = {
       sub: user.id,
       username: user.username,
