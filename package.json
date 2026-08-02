@@ -9,6 +9,8 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
+    "verify:pgvector": "ts-node src/rag/scripts/verify-pgvector.ts",
+    "verify:embedding": "ts-node src/rag/scripts/verify-embedding.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "seed": "ts-node src/scripts/seed.ts"
