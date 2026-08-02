@@ -14,7 +14,9 @@
     "seed": "ts-node src/scripts/seed.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.27",
     "@anthropic-ai/sdk": "^0.39.0",
+    "@mastra/core": "^1.55.0",
     "@nestjs/bullmq": "^11.0.4",
     "@nestjs/common": "^11.1.28",
     "@nestjs/config": "^4.0.4",
@@ -26,6 +28,7 @@
     "@nestjs/swagger": "^11.4.5",
     "@nestjs/typeorm": "^11.0.3",
     "@types/multer": "^2.2.0",
+    "ai": "^7.0.48",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.34.1",
     "class-transformer": "^0.5.1",
@@ -39,7 +42,8 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "swagger-ui-express": "^5.0.1",
-    "typeorm": "^0.3.26"
+    "typeorm": "^0.3.26",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",

@@ -22,6 +22,7 @@ import { ApprovalRequestMapper } from './mappers/approval-request.mapper';
 import { AnomalyFlagMapper } from './mappers/anomaly-flag.mapper';
 import { InventoryService } from './inventory.service';
 import { ToolExecutorService } from './tool-executor.service';
+import { MastraService } from './mastra.service';
 
 @Module({
   imports: [
@@ -43,7 +44,8 @@ import { ToolExecutorService } from './tool-executor.service';
     AnomalyFlagMapper,
     InventoryService,
     ToolExecutorService,
+    MastraService,
   ],
-  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService],
+  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MastraService],
 })
 export class AgentsModule {}
