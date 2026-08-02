@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { StockMovement } from './entities/stock-movement.entity';
@@ -12,6 +13,8 @@ import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { StockMovementResponseDto } from './dto/stock-movement-response.dto';
 import { StockMovementMapper } from './mappers/stock-movement.mapper';
 import { paginate } from '../../utils/pagination.util';
+import { NotificationEvents } from '../../notifications/events/notification-events';
+import { LowStockDetectedEvent } from '../../notifications/events/low-stock-detected.event';
 
 export interface RecordMovementParams {
   skuId: string;
@@ -61,6 +64,8 @@ export class StockMovementService {
     private readonly dataSource: DataSource,
 
     private readonly mapper: StockMovementMapper,
+
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -138,6 +143,21 @@ export class StockMovementService {
       // Step 7: Update the denormalized cache on the StockLevel
       stockLevel.quantity = newBalance;
       await slRepo.save(stockLevel);
+
+      // Step 7b: Emit low-stock event when quantity crosses the reorder threshold
+      if (stockLevel.reorderThreshold > 0 && newBalance <= stockLevel.reorderThreshold) {
+        this.eventEmitter.emit(
+          NotificationEvents.LOW_STOCK_DETECTED,
+          new LowStockDetectedEvent(tenantId, {
+            skuId: params.skuId,
+            warehouseId: params.warehouseId,
+            quantity: newBalance,
+            reorderThreshold: stockLevel.reorderThreshold,
+            safetyStock: stockLevel.safetyStock,
+            detectedAt: new Date().toISOString(),
+          }),
+        );
+      }
 
       // Step 8: Return mapped response
       return this.mapper.toResponse(saved);
@@ -337,6 +357,21 @@ export class StockMovementService {
       await slRepo.save(sourceSl);
       destSl.quantity = newDestBalance;
       await slRepo.save(destSl);
+
+      // Emit low-stock event when the source warehouse crosses the threshold
+      if (sourceSl.reorderThreshold > 0 && newSourceBalance <= sourceSl.reorderThreshold) {
+        this.eventEmitter.emit(
+          NotificationEvents.LOW_STOCK_DETECTED,
+          new LowStockDetectedEvent(tenantId, {
+            skuId: params.skuId,
+            warehouseId: params.fromWarehouseId,
+            quantity: newSourceBalance,
+            reorderThreshold: sourceSl.reorderThreshold,
+            safetyStock: sourceSl.safetyStock,
+            detectedAt: new Date().toISOString(),
+          }),
+        );
+      }
 
       return {
         out: this.mapper.toResponse(savedOut),
