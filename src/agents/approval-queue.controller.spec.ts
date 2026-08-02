@@ -38,9 +38,10 @@ describe('ApprovalQueueController', () => {
       mockService.findPending.mockResolvedValue({ data: mockData, total: 2 });
 
       const query: ApprovalQueryDto = { page: 1, limit: 10 };
-      const result = await controller.findAll(query);
+      const mockUser = { id: 'u1', tenantId: 'tenant-1' } as any;
+      const result = await controller.findAll(query, mockUser);
 
-      expect(mockService.findPending).toHaveBeenCalledWith(query);
+      expect(mockService.findPending).toHaveBeenCalledWith('tenant-1', query);
       expect(result).toEqual({
         success: true,
         data: mockData,
