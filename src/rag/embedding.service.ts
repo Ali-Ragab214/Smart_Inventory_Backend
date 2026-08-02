@@ -1,75 +1,50 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { pipeline, env } from '@xenova/transformers';
+import type { FeatureExtractionPipeline } from '@xenova/transformers';
 
-const EMBEDDING_MODEL = 'text-embedding-3-small';
-const EMBEDDING_DIMENSIONS = 1536;
-const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
+const EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2';
+const EMBEDDING_DIMENSIONS = 384;
+
+env.allowRemoteModels = true;
 
 @Injectable()
-export class EmbeddingService {
+export class EmbeddingService implements OnModuleDestroy {
+  private pipeline: FeatureExtractionPipeline | null = null;
+  private readonly logger = new Logger(EmbeddingService.name);
+
+  private async getPipeline(): Promise<FeatureExtractionPipeline> {
+    if (!this.pipeline) {
+      this.logger.log(`Loading local embedding model: ${EMBEDDING_MODEL}`);
+      this.pipeline = (await pipeline(
+        'feature-extraction',
+        EMBEDDING_MODEL,
+      )) as FeatureExtractionPipeline;
+      this.logger.log('Embedding model loaded.');
+    }
+    return this.pipeline;
+  }
+
   async embed(text: string): Promise<number[]> {
     if (typeof text !== 'string' || text.trim().length === 0) {
       throw new Error('Embedding text must be a non-empty string.');
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
+    const p = await this.getPipeline();
+    const output = await p(text, {
+      pooling: 'mean',
+      normalize: true,
+    });
+
+    const vector = Array.from(output.data as Float32Array);
+    if (vector.length !== EMBEDDING_DIMENSIONS) {
       throw new Error(
-        'OPENAI_API_KEY is not set in environment variables. Embedding features are unavailable.',
+        `Unexpected embedding size: expected ${EMBEDDING_DIMENSIONS}, got ${vector.length}.`,
       );
     }
+    return vector;
+  }
 
-    let response: Response;
-    try {
-      response = await fetch(OPENAI_EMBEDDINGS_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: EMBEDDING_MODEL,
-          input: text,
-        }),
-      });
-    } catch (err) {
-      throw new Error(
-        `OpenAI embeddings request failed: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `OpenAI embeddings request failed with status ${response.status}: ${body}`,
-      );
-    }
-
-    let data: unknown;
-    try {
-      data = await response.json();
-    } catch (err) {
-      throw new Error(
-        `Failed to parse OpenAI embeddings response: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-
-    const embedding = (
-      data as { data?: Array<{ embedding?: unknown }> }
-    ).data?.[0]?.embedding;
-
-    if (
-      !Array.isArray(embedding) ||
-      embedding.length !== EMBEDDING_DIMENSIONS
-    ) {
-      throw new Error(
-        `Unexpected embeddings response: expected a ${EMBEDDING_DIMENSIONS}-dimensional vector.`,
-      );
-    }
-
-    return embedding as number[];
+  async onModuleDestroy(): Promise<void> {
+    this.pipeline = null;
   }
 }

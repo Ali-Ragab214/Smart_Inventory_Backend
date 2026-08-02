@@ -41,7 +41,7 @@ async function run(): Promise<number> {
     );
     const colPass = col.rowCount === 1 && col.rows[0].udt_name === 'vector';
     results.push({
-      name: 'knowledge_chunks.embedding column (vector(1536))',
+      name: 'knowledge_chunks.embedding column (vector(384))',
       pass: colPass,
       detail:
         col.rowCount === 1
@@ -50,8 +50,8 @@ async function run(): Promise<number> {
       fix: colPass
         ? undefined
         : col.rowCount === 1
-          ? 'ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE vector(1536) USING embedding::vector;'
-          : 'ALTER TABLE knowledge_chunks ADD COLUMN embedding vector(1536);',
+          ? 'ALTER TABLE knowledge_chunks ALTER COLUMN embedding TYPE vector(384) USING embedding::vector;'
+          : 'ALTER TABLE knowledge_chunks ADD COLUMN embedding vector(384);',
     });
 
     const idx = await client.query(
@@ -106,3 +106,4 @@ run()
     void pool.end();
     process.exit(1);
   });
+
