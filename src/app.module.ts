@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { BullModule } from "@nestjs/bullmq";
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { SkuModule } from './sku/sku.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
@@ -13,12 +14,15 @@ import { CategoriesModule } from './categories/categories.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
 import { StockLevelsModule } from './inventory/stock-levels/stock-levels.module';
 import { KnowledgeChunksModule } from './knowledge-chunks/knowledge-chunks.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+
+    EventEmitterModule.forRoot(),
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -55,6 +59,7 @@ import { KnowledgeChunksModule } from './knowledge-chunks/knowledge-chunks.modul
     WarehousesModule,
     StockLevelsModule,
     KnowledgeChunksModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}
