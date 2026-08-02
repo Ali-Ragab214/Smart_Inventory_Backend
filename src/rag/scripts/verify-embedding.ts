@@ -8,13 +8,6 @@ interface CheckResult {
 }
 
 async function run(): Promise<number> {
-  if (!process.env.OPENAI_API_KEY) {
-    console.log(
-      'SKIP: OPENAI_API_KEY is not set. Add it to .env and re-run this script.',
-    );
-    return 2;
-  }
-
   const service = new EmbeddingService();
   const results: CheckResult[] = [];
 
@@ -22,9 +15,9 @@ async function run(): Promise<number> {
     const v = await service.embed(
       'What is the price of product X from vendor Y?',
     );
-    const inRange = v.length === 1536 && v.every((n) => n >= -1 && n <= 1);
+    const inRange = v.length === 384 && v.every((n) => n >= -1 && n <= 1);
     results.push({
-      name: 'embed(long query) returns 1536 dims in [-1, 1]',
+      name: 'embed(long query) returns 384 dims in [-1, 1]',
       pass: inRange,
       detail: `got ${v.length} dims`,
     });
@@ -40,8 +33,8 @@ async function run(): Promise<number> {
     try {
       const v = await service.embed(input);
       results.push({
-        name: `embed('${input}') returns 1536 dims`,
-        pass: v.length === 1536,
+        name: `embed('${input}') returns 384 dims`,
+        pass: v.length === 384,
         detail: `got ${v.length} dims`,
       });
     } catch (err) {
@@ -81,7 +74,7 @@ async function run(): Promise<number> {
   console.log(
     allPass
       ? 'All embedding checks passed.'
-      : 'Some checks failed. Confirm OPENAI_API_KEY is valid.',
+      : 'Some checks failed. See details above.',
   );
   return allPass ? 0 : 1;
 }
