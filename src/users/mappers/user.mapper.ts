@@ -8,6 +8,10 @@ export class UserMapper {
   toEntity(dto: CreateUserDto): User {
     const user = new User();
     user.name = dto.name?.trim() ?? '';
+    user.phone = null;
+    user.avatarUrl = null;
+    user.location = null;
+    user.bio = null;
     user.email = dto.email.toLowerCase().trim();
     user.username = dto.username.trim();
     user.passwordHash = dto.password; // raw — hashed by @BeforeInsert hook on entity
@@ -21,6 +25,10 @@ export class UserMapper {
     const dto = new UserResponseDto();
     dto.id = entity.id;
     dto.name = entity.name;
+    dto.phone = entity.phone ?? null;
+    dto.avatarUrl = entity.avatarUrl ?? null;
+    dto.location = entity.location ?? null;
+    dto.bio = entity.bio ?? null;
     dto.email = entity.email;
     dto.username = entity.username;
     dto.role = entity.role;

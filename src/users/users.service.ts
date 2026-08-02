@@ -10,6 +10,7 @@ import { User, UserRole } from './entities/user.entity';
 import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UserMapper } from './mappers/user.mapper';
 import { PaginationQueryDto } from '../utils/query.dto';
@@ -92,6 +93,10 @@ export class UsersService {
     return this.userMapper.toResponse(user);
   }
 
+  async findMe(id: string): Promise<UserResponseDto> {
+    return this.findById(id);
+  }
+
   /**
    * Returns the raw User entity WITH the passwordHash field selected.
    * For AUTH USE ONLY — never expose this outside of the auth flow.
@@ -155,6 +160,33 @@ export class UsersService {
 
     const saved = await this.userRepository.save(user);
     this.logger.log(`User updated: ${saved.id}`);
+    return this.userMapper.toResponse(saved);
+  }
+
+  async updateMe(id: string, updateProfileDto: UpdateProfileDto): Promise<UserResponseDto> {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) {
+      throw new NotFoundException(`User with ID "${id}" not found`);
+    }
+
+    if (updateProfileDto.name !== undefined) {
+      user.name = updateProfileDto.name;
+    }
+    if (updateProfileDto.phone !== undefined) {
+      user.phone = updateProfileDto.phone ?? null;
+    }
+    if (updateProfileDto.location !== undefined) {
+      user.location = updateProfileDto.location ?? null;
+    }
+    if (updateProfileDto.bio !== undefined) {
+      user.bio = updateProfileDto.bio ?? null;
+    }
+    if (updateProfileDto.avatarUrl !== undefined) {
+      user.avatarUrl = updateProfileDto.avatarUrl ?? null;
+    }
+
+    const saved = await this.userRepository.save(user);
+    this.logger.log(`User profile updated: ${saved.id}`);
     return this.userMapper.toResponse(saved);
   }
 
