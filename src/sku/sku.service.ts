@@ -41,6 +41,11 @@ export class SkuService {
     const qb = this.skuRepository.createQueryBuilder('sku')
       .where('sku.tenantId = :tenantId', { tenantId });
     applySortAndSearch(qb, 'sku', query.sortBy, query.sortOrder, query.search, ['name', 'sku']);
+    
+    if (query.categoryId) {
+      qb.andWhere('sku.categoryId = :categoryId', { categoryId: query.categoryId });
+    }
+
     const result = await paginate(qb, query.page!, query.limit!);
     return { data: this.skuMapper.toResponseList(result.data), total: result.total };
   }

@@ -5,4 +5,5 @@ coverage/
 *.log
 StockSavvy.postman_collection.json
 docs/
-FRONTEND_SCREENS.md
+*.md
+scripts/
