@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { VendorCatalogEntry } from './entities/vendor-catalog-entry.entity';
@@ -13,6 +14,8 @@ import { VendorCatalogEntryMapper } from './mappers/vendor-catalog-entry.mapper'
 import { VendorCatalogEntryQueryDto } from './dto/vendor-catalog-entry-query.dto';
 import { paginate } from '../utils/pagination.util';
 import { applySortAndSearch } from '../utils/query.util';
+import { NotificationEvents } from '../notifications/events/notification-events';
+import { VendorRespondedEvent } from '../notifications/events/vendor-responded.event';
 
 @Injectable()
 export class VendorCatalogEntriesService {
@@ -20,6 +23,7 @@ export class VendorCatalogEntriesService {
     @InjectRepository(VendorCatalogEntry)
     private readonly catalogRepo: Repository<VendorCatalogEntry>,
     private readonly mapper: VendorCatalogEntryMapper,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(
@@ -37,6 +41,19 @@ export class VendorCatalogEntriesService {
     const entry = this.mapper.toEntity(dto, vendorId);
     entry.tenantId = tenantId;
     const saved = await this.catalogRepo.save(entry);
+
+    this.eventEmitter.emit(
+      NotificationEvents.VENDOR_RESPONDED,
+      new VendorRespondedEvent(tenantId, {
+        vendorId,
+        skuId: saved.skuId,
+        catalogEntryId: saved.id,
+        price: saved.price,
+        leadTimeDays: saved.leadTimeDays,
+        respondedAt: saved.createdAt.toISOString(),
+      }),
+    );
+
     return this.mapper.toResponse(saved);
   }
 
