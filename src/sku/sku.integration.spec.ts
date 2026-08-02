@@ -122,7 +122,9 @@ SKU004,Monitor,27-inch 4K,Displays,PCS,300,450`;
       buffer: Buffer.from(csvContent, 'utf-8'),
     } as Express.Multer.File;
 
-    const response = await controller.importCsv(mockFile);
+    const mockUser = { id: 'user-1', tenantId: 'tenant-1' } as any;
+
+    const response = await controller.importCsv(mockFile, mockUser);
 
     expect(response.success).toBe(true);
     expect(response.data.totalRows).toBe(5);
