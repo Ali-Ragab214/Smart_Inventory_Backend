@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { Queue } from 'bullmq';
+import { InjectQueue } from '@nestjs/bullmq';
 import { AgentRun } from './entities/agent-run.entity';
 import { AgentStep } from './entities/agent-step.entity';
 import { AgentRunMapper } from './mappers/agent-run.mapper';
@@ -23,7 +25,7 @@ export type AgentRunStatus =
   | 'escalated';
 
 export type AgentRunRelatedInput = {
-  skuId?: string;
+  skuIds?: string[];
   vendorId?: string;
   poId?: string;
 };
@@ -52,17 +54,20 @@ export class AgentRunService {
     private readonly stepRepository: Repository<AgentStep>,
     private readonly dataSource: DataSource,
     private readonly mapper: AgentRunMapper,
+    @InjectQueue('agent-jobs')
+    private readonly agentQueue: Queue,
   ) {}
 
-  async start(agentType: AgentType, related: AgentRunRelatedInput = {}) {
+  async start(tenantId: string, agentType: AgentType, related: AgentRunRelatedInput = {}) {
     if (!VALID_AGENT_TYPES.includes(agentType)) {
-      throw new BadRequestException(`Invalid agent type: ${agentType}`);
+      throw new BadRequestException({ message: 'The provided agent type is not recognized.', code: 'INVALID_AGENT_TYPE' });
     }
 
     const run = this.runRepository.create({
+      tenantId,
       agentType,
       status: 'in_progress',
-      relatedSkuId: related.skuId ?? null,
+      skus: related.skuIds?.map(id => ({ id } as any)) ?? [],
       relatedVendorId: related.vendorId ?? null,
       relatedPoId: related.poId ?? null,
     });
@@ -71,10 +76,14 @@ export class AgentRunService {
     return successResponse(this.mapper.toRunResponse(saved));
   }
 
-  async load(runId: string) {
-    const run = await this.runRepository.findOne({ where: { id: runId } });
+  async enqueue(runId: string, agentType: AgentType): Promise<void> {
+    await this.agentQueue.add('run-agent-step', { runId, agentType });
+  }
+
+  async load(tenantId: string, runId: string) {
+    const run = await this.runRepository.findOne({ where: { id: runId, tenantId } });
     if (!run) {
-      throw new NotFoundException(`Agent run with ID "${runId}" not found`);
+      throw new NotFoundException({ message: 'The requested agent run could not be found.', code: 'AGENT_RUN_NOT_FOUND' });
     }
 
     const steps = await this.stepRepository.find({
@@ -88,6 +97,7 @@ export class AgentRunService {
   }
 
   async appendStep(
+    tenantId: string,
     runId: string,
     input: object,
     output: object,
@@ -98,11 +108,11 @@ export class AgentRunService {
       const stepRepo = manager.getRepository(AgentStep);
 
       const run = await runRepo.findOne({
-        where: { id: runId },
+        where: { id: runId, tenantId },
         lock: { mode: 'pessimistic_write' },
       });
       if (!run) {
-        throw new NotFoundException(`Agent run with ID "${runId}" not found`);
+        throw new NotFoundException({ message: 'The requested agent run could not be found.', code: 'AGENT_RUN_NOT_FOUND' });
       }
 
       const existingSteps = await stepRepo.count({
@@ -123,14 +133,14 @@ export class AgentRunService {
     });
   }
 
-  async updateStatus(runId: string, status: AgentRunStatus) {
+  async updateStatus(tenantId: string, runId: string, status: AgentRunStatus) {
     if (!VALID_STATUSES.includes(status)) {
-      throw new BadRequestException(`Invalid run status: ${status}`);
+      throw new BadRequestException({ message: 'The provided status update is invalid.', code: 'INVALID_RUN_STATUS' });
     }
 
-    const run = await this.runRepository.findOne({ where: { id: runId } });
+    const run = await this.runRepository.findOne({ where: { id: runId, tenantId } });
     if (!run) {
-      throw new NotFoundException(`Agent run with ID "${runId}" not found`);
+      throw new NotFoundException({ message: 'The requested agent run could not be found.', code: 'AGENT_RUN_NOT_FOUND' });
     }
 
     run.status = status;
@@ -138,8 +148,9 @@ export class AgentRunService {
     return successResponse(this.mapper.toRunResponse(saved));
   }
 
-  async findRecent(limit = 20) {
+  async findRecent(tenantId: string, limit = 20) {
     const runs = await this.runRepository.find({
+      where: { tenantId },
       order: { updatedAt: 'DESC' },
       take: limit,
     });

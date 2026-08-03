@@ -1,10 +1,15 @@
 import { MovementReason } from '../enums/movement-reason.enum';
 
-
 export class StockMovementResponseDto {
   id!: string;
 
   skuId!: string;
+
+  skuCode!: string | null;
+
+  skuName!: string | null;
+
+  warehouseId!: string;
 
   reason!: MovementReason;
 

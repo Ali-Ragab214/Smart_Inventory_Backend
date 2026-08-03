@@ -22,6 +22,8 @@ import { paginatedResponse, successResponse } from '../utils/response.util';
 import { ApprovalQueryDto } from './dto/approval-query.dto';
 import { ApproveApprovalRequestDto, RejectApprovalRequestDto } from './dto/approval-action.dto';
 import { ApprovalRequestResponseDto } from './dto/approval-request-response.dto';
+import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 
 @ApiTags('approvals')
 @ApiBearerAuth()
@@ -32,8 +34,8 @@ export class ApprovalQueueController {
   @Get()
   @ApiOperation({ summary: 'List pending approval requests' })
   @ApiOkResponse({ type: ApprovalRequestResponseDto, isArray: true })
-  async findAll(@Query() query: ApprovalQueryDto) {
-    const { data, total } = await this.service.findPending(query);
+  async findAll(@Query() query: ApprovalQueryDto, @CurrentUser() user: UserResponseDto) {
+    const { data, total } = await this.service.findPending(user.tenantId!, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
@@ -46,8 +48,9 @@ export class ApprovalQueueController {
   async approve(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: ApproveApprovalRequestDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.service.approve(id, body.reviewedBy, body.editedPayload);
+    const data = await this.service.approve(user.tenantId!, id, body.reviewedBy, body.editedPayload);
     return successResponse(data);
   }
 
@@ -60,8 +63,9 @@ export class ApprovalQueueController {
   async reject(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: RejectApprovalRequestDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.service.reject(id, body.reviewedBy);
+    const data = await this.service.reject(user.tenantId!, id, body.reviewedBy);
     return successResponse(data);
   }
 }

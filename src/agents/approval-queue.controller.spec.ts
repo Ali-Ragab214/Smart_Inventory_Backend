@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ApprovalQueueController } from './approval-queue.controller';
 import { ApprovalQueueService } from './approval-queue.service';
+import { ApprovalQueryDto } from './dto/approval-query.dto';
 
 describe('ApprovalQueueController', () => {
   let controller: ApprovalQueueController;
@@ -34,12 +35,18 @@ describe('ApprovalQueueController', () => {
         { id: 'ar-1', type: 'agent_request', status: 'pending', description: 'reorder agent step 2', createdAt: new Date() },
         { id: 'po-1', type: 'purchase_order', status: 'pending_approval', description: 'Purchase Order', createdAt: new Date() },
       ];
-      mockService.findPending.mockResolvedValue(mockData);
+      mockService.findPending.mockResolvedValue({ data: mockData, total: 2 });
 
-      const result = await controller.findAll();
+      const query: ApprovalQueryDto = { page: 1, limit: 10 };
+      const mockUser = { id: 'u1', tenantId: 'tenant-1' } as any;
+      const result = await controller.findAll(query, mockUser);
 
-      expect(mockService.findPending).toHaveBeenCalled();
-      expect(result).toEqual({ success: true, data: mockData, meta: null });
+      expect(mockService.findPending).toHaveBeenCalledWith('tenant-1', query);
+      expect(result).toEqual({
+        success: true,
+        data: mockData,
+        meta: { total: 2, page: 1, limit: 10, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+      });
     });
   });
 });

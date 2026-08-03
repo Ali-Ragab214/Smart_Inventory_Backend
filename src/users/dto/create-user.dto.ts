@@ -1,13 +1,22 @@
 import {
   IsEmail,
+  IsEnum,
   IsString,
+  IsUUID,
   MinLength,
   MaxLength,
   IsOptional,
   Matches,
 } from "class-validator";
+import { UserRole } from "../entities/user.entity";
 
 export class CreateUserDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(255)
+  name?: string;
+
   @IsEmail()
   email: string;
 
@@ -19,19 +28,28 @@ export class CreateUserDto {
   @IsString()
   @MinLength(8)
   @MaxLength(255)
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/, {
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]+$/, {
     message:
       "Password must contain uppercase, lowercase, number, and special character",
   })
   password: string;
 
   @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
+
+  @IsOptional()
   @IsString()
+  @MinLength(2)
   @MaxLength(255)
-  firstName?: string;
+  warehouseName?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(255)
-  lastName?: string;
+  warehouseLocation?: string;
+
+  @IsOptional()
+  @IsEnum(UserRole)
+  role?: UserRole;
 }

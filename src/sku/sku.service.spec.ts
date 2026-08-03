@@ -1,14 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { BadRequestException } from '@nestjs/common';
 import { SkuService } from './sku.service';
 import { Sku } from './entities/sku.entity';
 import { SkuMapper } from './mappers/sku.mapper';
+import { StockLevelsService } from '../inventory/stock-levels/stock-levels.service';
 
 describe('SkuService', () => {
   let service: SkuService;
   let repository: Repository<Sku>;
+
+  const TENANT_ID = 'tenant-uuid';
 
   const mockQueryRunner = {
     connect: jest.fn(),
@@ -44,6 +47,18 @@ describe('SkuService', () => {
           provide: getRepositoryToken(Sku),
           useValue: mockRepository,
         },
+        {
+          provide: StockLevelsService,
+          useValue: { autoInitializeForSku: jest.fn(), autoInitializeForSkus: jest.fn() },
+        },
+        {
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn().mockImplementation(async (cb) => {
+              return cb(mockQueryRunner.manager);
+            }),
+          },
+        },
       ],
     }).compile();
 
@@ -57,7 +72,7 @@ describe('SkuService', () => {
 
   describe('importCsv', () => {
     it('should throw BadRequestException if buffer is empty', async () => {
-      await expect(service.importCsv(Buffer.from(''))).rejects.toThrow(
+      await expect(service.importCsv(TENANT_ID, Buffer.from(''))).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -65,14 +80,14 @@ describe('SkuService', () => {
     it('should throw BadRequestException if CSV is malformed', async () => {
       const malformedCsv = 'skuCode,name\n"unclosed quote,value';
       await expect(
-        service.importCsv(Buffer.from(malformedCsv)),
+        service.importCsv(TENANT_ID, Buffer.from(malformedCsv)),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('should throw BadRequestException if CSV contains no data rows', async () => {
       const emptyCsv =
         'skuCode,name,description,category,unit,costPrice,sellingPrice\n';
-      await expect(service.importCsv(Buffer.from(emptyCsv))).rejects.toThrow(
+      await expect(service.importCsv(TENANT_ID, Buffer.from(emptyCsv))).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -85,7 +100,7 @@ SKU002,Mouse,Wireless Mouse,Accessories,PCS,20,35`;
       mockRepository.find.mockResolvedValue([]);
       mockQueryRunner.manager.save.mockResolvedValue([]);
 
-      const result = await service.importCsv(Buffer.from(validCsv));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(validCsv));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(2);
@@ -100,15 +115,15 @@ SKU002,Mouse,Wireless Mouse,Accessories,PCS,20,35`;
 SKU001,,1000,1300
 ,Mouse,20,35`;
 
-      const result = await service.importCsv(Buffer.from(csvData));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(csvData));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(0);
       expect(result.failed).toBe(2);
       expect(result.errors).toHaveLength(2);
-      expect(result.errors[0].row).toBe(1);
+      expect(result.errors[0].row).toBe(2);
       expect(result.errors[0].message).toContain('name');
-      expect(result.errors[1].row).toBe(2);
+      expect(result.errors[1].row).toBe(3);
       expect(result.errors[1].message).toContain('skuCode');
     });
 
@@ -117,14 +132,14 @@ SKU001,,1000,1300
 SKU001,Laptop,invalid_cost,1300
 SKU002,Mouse,20,-35`;
 
-      const result = await service.importCsv(Buffer.from(csvData));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(csvData));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(0);
       expect(result.failed).toBe(2);
-      expect(result.errors[0].row).toBe(1);
+      expect(result.errors[0].row).toBe(2);
       expect(result.errors[0].skuCode).toBe('SKU001');
-      expect(result.errors[1].row).toBe(2);
+      expect(result.errors[1].row).toBe(3);
       expect(result.errors[1].skuCode).toBe('SKU002');
     });
 
@@ -136,12 +151,12 @@ SKU001,Laptop Duplicate,1000,1300`;
       mockRepository.find.mockResolvedValue([]);
       mockQueryRunner.manager.save.mockResolvedValue([]);
 
-      const result = await service.importCsv(Buffer.from(csvData));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(csvData));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(1);
       expect(result.failed).toBe(1);
-      expect(result.errors[0].row).toBe(2);
+      expect(result.errors[0].row).toBe(3);
       expect(result.errors[0].skuCode).toBe('SKU001');
       expect(result.errors[0].message).toContain('Duplicate SKU code "SKU001" found in CSV file');
     });
@@ -151,15 +166,15 @@ SKU001,Laptop Duplicate,1000,1300`;
 SKU001,Laptop,1000,1300
 SKU002,Mouse,20,35`;
 
-      mockRepository.find.mockResolvedValue([{ skuCode: 'SKU001' }]);
+      mockRepository.find.mockResolvedValue([{ sku: 'SKU001' }]);
       mockQueryRunner.manager.save.mockResolvedValue([]);
 
-      const result = await service.importCsv(Buffer.from(csvData));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(csvData));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(1);
       expect(result.failed).toBe(1);
-      expect(result.errors[0].row).toBe(1);
+      expect(result.errors[0].row).toBe(2);
       expect(result.errors[0].skuCode).toBe('SKU001');
       expect(result.errors[0].message).toBe('SKU code "SKU001" already exists');
     });
@@ -173,7 +188,7 @@ SKU002,Mouse,20,35`;
       mockRepository.find.mockResolvedValue([]);
       mockQueryRunner.manager.save.mockResolvedValue([]);
 
-      const result = await service.importCsv(bomBuffer);
+      const result = await service.importCsv(TENANT_ID, bomBuffer);
 
       expect(result.totalRows).toBe(1);
       expect(result.successful).toBe(1);

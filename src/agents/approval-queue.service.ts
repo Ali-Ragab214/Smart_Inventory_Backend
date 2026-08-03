@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApprovalRequest } from './entities/approval-request.entity';
@@ -9,6 +10,8 @@ import { paginate } from '../utils/pagination.util';
 import { AgentRunService } from './agent-run.service';
 import { ApprovalRequestResponseDto } from './dto/approval-request-response.dto';
 import { ApproveApprovalRequestDto, RejectApprovalRequestDto } from './dto/approval-action.dto';
+import { NotificationEvents } from '../notifications/events/notification-events';
+import { ApprovalRequestedEvent } from '../notifications/events/approval-requested.event';
 
 @Injectable()
 export class ApprovalQueueService {
@@ -17,10 +20,12 @@ export class ApprovalQueueService {
     private readonly approvalRepo: Repository<ApprovalRequest>,
     private readonly mapper: ApprovalRequestMapper,
     private readonly agentRunService: AgentRunService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async create(data: CreateApprovalRequestDto): Promise<ApprovalRequestResponseDto> {
+  async create(tenantId: string, data: CreateApprovalRequestDto): Promise<ApprovalRequestResponseDto> {
     const approval = this.approvalRepo.create({
+      tenantId,
       agentRunId: data.agentRunId,
       agentType: data.agentType,
       stepNumber: data.stepNumber,
@@ -32,15 +37,30 @@ export class ApprovalQueueService {
     });
 
     const saved = await this.approvalRepo.save(approval);
+
+    this.eventEmitter.emit(
+      NotificationEvents.APPROVAL_REQUESTED,
+      new ApprovalRequestedEvent(tenantId, {
+        approvalId: saved.id,
+        agentRunId: saved.agentRunId,
+        agentType: saved.agentType,
+        stepNumber: saved.stepNumber,
+        reasoning: saved.reasoning,
+        requestedAt: saved.createdAt.toISOString(),
+      }),
+    );
+
     return this.mapper.toResponse(saved);
   }
 
   async findPending(
+    tenantId: string,
     query: ApprovalQueryDto,
   ): Promise<{ data: ApprovalRequestResponseDto[]; total: number }> {
     const qb = this.approvalRepo
       .createQueryBuilder('approval')
       .where('approval.status = :status', { status: 'pending' })
+      .andWhere('approval.tenantId = :tenantId', { tenantId })
       .orderBy('approval.createdAt', 'DESC');
 
     if (query.agentType) {
@@ -57,13 +77,14 @@ export class ApprovalQueueService {
   }
 
   async approve(
+    tenantId: string,
     id: string,
     reviewedBy: string,
     editedPayload?: object,
   ): Promise<ApprovalRequestResponseDto> {
-    const approval = await this.approvalRepo.findOne({ where: { id } });
+    const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
-      throw new NotFoundException(`Approval request with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
     }
 
     approval.status = 'approved';
@@ -81,19 +102,20 @@ export class ApprovalQueueService {
   }
 
   async reject(
+    tenantId: string,
     id: string,
     reviewedBy: string,
   ): Promise<ApprovalRequestResponseDto> {
-    const approval = await this.approvalRepo.findOne({ where: { id } });
+    const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
-      throw new NotFoundException(`Approval request with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
     }
 
     approval.status = 'rejected';
     approval.reviewedBy = reviewedBy;
     approval.reviewedAt = new Date();
     const saved = await this.approvalRepo.save(approval);
-    await this.agentRunService.updateStatus(approval.agentRunId, 'rejected');
+    await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'rejected');
     return this.mapper.toResponse(saved);
   }
 }

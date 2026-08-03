@@ -5,36 +5,36 @@ import {
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
-import { AbstractEntity } from '../../../shared/base.entity';
+import { AbstractTenantEntity } from '../../../shared/tenant.entity';
 import { Sku } from '../../../sku/entities/sku.entity';
+import { User } from '../../../users/entities/user.entity';
+import { Warehouse } from '../../../warehouses/entities/warehouse.entity';
 import { MovementReason } from '../enums/movement-reason.enum';
 
-/**
- * APPEND-ONLY LEDGER — never UPDATE or DELETE rows in this table.
- *
- * Each row records a single atomic stock change for one SKU.
- * `balanceAfter` is a denormalized snapshot captured at insert time
- * so that history is fully self-contained for audit purposes.
- *
- * Concurrency: callers MUST hold a pessimistic write-lock on the
- * parent Sku row (inside a transaction) before inserting here, to
- * prevent double-counting on concurrent requests.
- *
- * Idempotency: `idempotencyKey` carries a UNIQUE constraint so that
- * any retry (from a job queue, agent, etc.) that re-submits the same
- * logical operation is safely deduplicated.
- */
+
 @Entity('stock_movements')
 @Index('idx_stock_movements_sku_created', ['skuId', 'createdAt'])
 @Index('idx_stock_movements_created', ['createdAt'])
-export class StockMovement extends AbstractEntity {
-  // ── Relation ────────────────────────────────────────────────────────────
+export class StockMovement extends AbstractTenantEntity {
+  // ── Relations ────────────────────────────────────────────────────────────
   @ManyToOne(() => Sku, { onDelete: 'RESTRICT', nullable: false })
   @JoinColumn({ name: 'sku_id' })
   sku!: Sku;
 
   @Column({ name: 'sku_id', type: 'uuid' })
   skuId!: string;
+
+  @ManyToOne(() => Warehouse, { onDelete: 'RESTRICT', nullable: false })
+  @JoinColumn({ name: 'warehouse_id' })
+  warehouse!: Warehouse;
+
+  @Index('idx_stock_movements_warehouse')
+  @Column({ name: 'warehouse_id', type: 'uuid' })
+  warehouseId!: string;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'performed_by' })
+  performedBy!: User | null;
 
   // ── Core movement fields ─────────────────────────────────────────────────
   @Column({ type: 'enum', enum: MovementReason })
@@ -47,12 +47,13 @@ export class StockMovement extends AbstractEntity {
   @Column({ type: 'int' })
   quantityChange!: number;
 
-  /** Snapshot of sku.currentQuantity AFTER this movement was applied. */
+  /** Snapshot of stock AFTER this movement was applied (internal audit). */
   @Column({ type: 'int' })
   balanceAfter!: number;
 
   // ── Attribution ───────────────────────────────────────────────────────────
-  @Column({ type: 'uuid', nullable: true })
+  /** User UUID who performed this movement (denormalized for fast query). */
+  @Column({ name: 'performed_by', type: 'uuid', nullable: true })
   performedByUserId!: string | null;
 
   /** E.g. 'reorder_agent', 'negotiation_agent' — for future agent integration. */
@@ -75,13 +76,9 @@ export class StockMovement extends AbstractEntity {
   /**
    * Caller-supplied key that uniquely identifies the logical operation.
    * UNIQUE constraint guarantees concurrent retries produce exactly
-   * one row.  NOT exposed in response DTOs — internal concern only.
+   * one row. NOT exposed in response DTOs — internal concern only.
    */
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 255 })
   idempotencyKey!: string;
-
-  // NOTE: No @UpdateDateColumn here — this table is insert-only.
-  // AbstractEntity.updatedAt is inherited but will never change in practice;
-  // it equals createdAt for every row in this table.
 }

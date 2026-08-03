@@ -1,0 +1,219 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { NotFoundException } from '@nestjs/common';
+import { StockLevelsService } from './stock-levels.service';
+import { StockLevel } from './entities/stock-level.entity';
+import { Sku } from '../../sku/entities/sku.entity';
+import { Warehouse } from '../../warehouses/entities/warehouse.entity';
+import { DataSource } from 'typeorm';
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function makeStockLevel(overrides: Partial<StockLevel> = {}): StockLevel {
+  return {
+    id: 'sl-uuid',
+    skuId: 'sku-uuid',
+    sku: { id: 'sku-uuid', name: 'Widget A' } as any,
+    warehouseId: 'wh-uuid',
+    warehouse: { id: 'wh-uuid', name: 'Main Warehouse' } as any,
+    quantity: 100,
+    reorderThreshold: 20,
+    safetyStock: 10,
+    createdAt: new Date('2026-01-01'),
+    updatedAt: new Date('2026-01-02'),
+    deletedAt: null,
+    ...overrides,
+  } as StockLevel;
+}
+
+
+function makeQueryBuilder(rows: StockLevel[], total: number) {
+  const qb: any = {
+    createQueryBuilder: jest.fn().mockReturnThis(),
+    leftJoinAndSelect: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
+    getManyAndCount: jest.fn().mockResolvedValue([rows, total]),
+    getMany: jest.fn().mockResolvedValue(rows),
+  };
+  return qb;
+}
+
+// ─── Suite 
+
+describe('StockLevelsService', () => {
+  let service: StockLevelsService;
+  let mockRepo: any;
+
+  const TENANT_ID = 'tenant-uuid';
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    mockRepo = {
+      createQueryBuilder: jest.fn(),
+      findOne: jest.fn(),
+      save: jest.fn(),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        StockLevelsService,
+        { provide: getRepositoryToken(StockLevel), useValue: mockRepo },
+        { provide: getRepositoryToken(Sku), useValue: mockRepo },
+        { provide: getRepositoryToken(Warehouse), useValue: mockRepo },
+        {
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn().mockImplementation(async (cb) => {
+              return cb();
+            }),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get<StockLevelsService>(StockLevelsService);
+  });
+
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
+
+  // ── findByWarehouse ──────────────────────────────────────────────────────────────
+
+  describe('findByWarehouse', () => {
+    it('should return paginated list mapped to response DTOs', async () => {
+      const level = makeStockLevel();
+      const qb = makeQueryBuilder([level], 1);
+      mockRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.findByWarehouse(TENANT_ID, 'wh-uuid', { page: 1, limit: 20 });
+
+      expect(result.total).toBe(1);
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].id).toBe('sl-uuid');
+      expect(result.data[0].skuName).toBe('Widget A');
+      expect(result.data[0].warehouseName).toBe('Main Warehouse');
+    });
+
+    it('should apply skuId filter when provided', async () => {
+      const qb = makeQueryBuilder([], 0);
+      mockRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findByWarehouse(TENANT_ID, 'wh-uuid', { page: 1, limit: 20, skuId: 'sku-uuid' });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('sl.skuId = :skuId', {
+        skuId: 'sku-uuid',
+      });
+    });
+
+    it('should apply warehouseId filter when provided', async () => {
+      const qb = makeQueryBuilder([], 0);
+      mockRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findByWarehouse(TENANT_ID, 'wh-uuid', { page: 1, limit: 20 });
+
+      expect(qb.where).toHaveBeenCalledWith('sl.warehouseId = :warehouseId', {
+        warehouseId: 'wh-uuid',
+      });
+    });
+  });
+
+  // ── findOne ──────────────────────────────────────────────────────────────
+
+  describe('findOne', () => {
+    it('should return a single mapped response DTO', async () => {
+      mockRepo.findOne.mockResolvedValue(makeStockLevel());
+
+      const result = await service.findOne(TENANT_ID, 'sl-uuid');
+
+      expect(result.id).toBe('sl-uuid');
+      expect(result.skuName).toBe('Widget A');
+      expect(result.warehouseName).toBe('Main Warehouse');
+      expect(result.quantity).toBe(100);
+    });
+
+    it('should throw NotFoundException when record does not exist', async () => {
+      mockRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.findOne(TENANT_ID, 'nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  // ── update ───────────────────────────────────────────────────────────────
+
+  describe('update', () => {
+    it('should update reorderThreshold and safetyStock and return updated DTO', async () => {
+      const level = makeStockLevel();
+      mockRepo.findOne.mockResolvedValue(level);
+      mockRepo.save.mockImplementation((entity: StockLevel) =>
+        Promise.resolve({ ...entity }),
+      );
+
+      const result = await service.update(TENANT_ID, 'sl-uuid', {
+        reorderThreshold: 30,
+        safetyStock: 15,
+      });
+
+      expect(mockRepo.save).toHaveBeenCalled();
+      expect(result.reorderThreshold).toBe(30);
+      expect(result.safetyStock).toBe(15);
+      // quantity must remain untouched
+      expect(result.quantity).toBe(100);
+    });
+
+    it('should update only reorderThreshold when safetyStock is omitted', async () => {
+      const level = makeStockLevel();
+      mockRepo.findOne.mockResolvedValue(level);
+      mockRepo.save.mockResolvedValue({ ...level, reorderThreshold: 40 });
+
+      const result = await service.update(TENANT_ID, 'sl-uuid', { reorderThreshold: 40 });
+
+      expect(result.reorderThreshold).toBe(40);
+    });
+
+    it('should throw NotFoundException when record does not exist', async () => {
+      mockRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.update(TENANT_ID, 'nonexistent', { reorderThreshold: 10 }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ── findLowStock ─────────────────────────────────────────────────────────
+
+  describe('findLowStock', () => {
+    it('should return stock levels where quantity is at or below reorderThreshold', async () => {
+      const lowLevel = makeStockLevel({ quantity: 5, reorderThreshold: 20 });
+      const qb = makeQueryBuilder([lowLevel], 1);
+      mockRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.findLowStock(TENANT_ID);
+
+      expect(qb.where).toHaveBeenCalledWith('sl.tenantId = :tenantId', {
+        tenantId: TENANT_ID,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'sl.quantity <= sl.reorderThreshold',
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0].quantity).toBe(5);
+    });
+
+    it('should return empty array when all stock is above threshold', async () => {
+      const qb = makeQueryBuilder([], 0);
+      mockRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.findLowStock(TENANT_ID);
+
+      expect(result).toHaveLength(0);
+    });
+  });
+});

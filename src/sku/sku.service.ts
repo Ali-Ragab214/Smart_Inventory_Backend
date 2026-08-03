@@ -1,13 +1,6 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
-import { validate, ValidationError } from 'class-validator';
-import { plainToInstance } from 'class-transformer';
+import { DataSource, Repository } from 'typeorm';
 import { parse } from 'csv-parse/sync';
 import { Sku } from './entities/sku.entity';
 import { CreateSkuDto } from './dto/create-sku.dto';
@@ -15,9 +8,10 @@ import { UpdateSkuDto } from './dto/update-sku.dto';
 import { SkuResponseDto } from './dto/sku-response.dto';
 import { SkuMapper } from './mappers/sku.mapper';
 import { SkuQueryDto } from './dto/sku-query.dto';
-import { CsvImportErrorDto, CsvImportResponseDto } from './dto/csv-import-response.dto';
+import { CsvImportResponseDto, CsvImportErrorDto } from './dto/csv-import-response.dto';
 import { paginate } from '../utils/pagination.util';
 import { applySortAndSearch } from '../utils/query.util';
+import { StockLevelsService } from '../inventory/stock-levels/stock-levels.service';
 
 @Injectable()
 export class SkuService {
@@ -25,245 +19,57 @@ export class SkuService {
     @InjectRepository(Sku)
     private readonly skuRepository: Repository<Sku>,
     private readonly skuMapper: SkuMapper,
+    private readonly dataSource: DataSource,
+    private readonly stockLevelsService: StockLevelsService,
   ) {}
 
-  async create(createSkuDto: CreateSkuDto): Promise<SkuResponseDto> {
+  async create(tenantId: string, createSkuDto: CreateSkuDto): Promise<SkuResponseDto> {
     const existing = await this.skuRepository.findOne({
-      where: { skuCode: createSkuDto.skuCode },
+      where: { sku: createSkuDto.sku, tenantId },
     });
     if (existing) {
-      throw new ConflictException(
-        `SKU code "${createSkuDto.skuCode}" already exists`,
-      );
+      throw new ConflictException({ message: `The SKU code "${createSkuDto.sku}" is already in use.`, code: 'SKU_IN_USE' });
     }
     const skuEntity = this.skuMapper.toEntity(createSkuDto);
+    skuEntity.tenantId = tenantId;
     const savedEntity = await this.skuRepository.save(skuEntity);
+    await this.stockLevelsService.autoInitializeForSku(tenantId, savedEntity.id);
     return this.skuMapper.toResponse(savedEntity);
   }
 
-  async importCsv(buffer: Buffer): Promise<CsvImportResponseDto> {
-    if (!buffer || buffer.length === 0) {
-      throw new BadRequestException('Uploaded CSV file is empty');
+  async findAll(tenantId: string, query: SkuQueryDto): Promise<{ data: SkuResponseDto[]; total: number }> {
+    const qb = this.skuRepository.createQueryBuilder('sku')
+      .where('sku.tenantId = :tenantId', { tenantId });
+    applySortAndSearch(qb, 'sku', query.sortBy, query.sortOrder, query.search, ['name', 'sku']);
+    
+    if (query.categoryId) {
+      qb.andWhere('sku.categoryId = :categoryId', { categoryId: query.categoryId });
     }
 
-    let records: Record<string, any>[];
-    try {
-      records = parse(buffer, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
-        bom: true,
-        relax_column_count: true,
-      });
-    } catch (err: any) {
-      throw new BadRequestException(`Malformed CSV file: ${err.message || err}`);
-    }
-
-    if (!records || records.length === 0) {
-      throw new BadRequestException('CSV file contains no data rows');
-    }
-
-    const errors: CsvImportErrorDto[] = [];
-    const validDtosToSave: { rowNum: number; dto: CreateSkuDto }[] = [];
-    const seenSkuCodesInCsv = new Set<string>();
-
-    // Pass 1: DTO Validation & CSV In-Memory Duplicate Check
-    for (let i = 0; i < records.length; i++) {
-      const rowNum = i + 1;
-      const rawRow = records[i];
-
-      const plainDtoObj = this.mapCsvRowToPlainDto(rawRow);
-      const dtoInstance = plainToInstance(CreateSkuDto, plainDtoObj);
-
-      const validationErrors = await validate(dtoInstance, { whitelist: true });
-      if (validationErrors.length > 0) {
-        errors.push({
-          row: rowNum,
-          skuCode: dtoInstance.skuCode || this.extractSkuCodeFromRaw(rawRow),
-          message: this.formatValidationErrors(validationErrors),
-        });
-        continue;
-      }
-
-      // Check for duplicate SKU code inside the CSV itself
-      const normalizedSkuCode = dtoInstance.skuCode;
-      if (seenSkuCodesInCsv.has(normalizedSkuCode)) {
-        errors.push({
-          row: rowNum,
-          skuCode: normalizedSkuCode,
-          message: `Duplicate SKU code "${normalizedSkuCode}" found in CSV file`,
-        });
-        continue;
-      }
-
-      seenSkuCodesInCsv.add(normalizedSkuCode);
-      validDtosToSave.push({ rowNum, dto: dtoInstance });
-    }
-
-    // Pass 2: DB Uniqueness Verification & Transactional Batch Insertion
-    let successfulCount = 0;
-
-    if (validDtosToSave.length > 0) {
-      const candidateCodes = validDtosToSave.map((item) => item.dto.skuCode);
-      const existingSkuCodesSet = await this.findExistingSkuCodes(candidateCodes);
-
-      const dtosToInsert: CreateSkuDto[] = [];
-
-      for (const item of validDtosToSave) {
-        if (existingSkuCodesSet.has(item.dto.skuCode)) {
-          errors.push({
-            row: item.rowNum,
-            skuCode: item.dto.skuCode,
-            message: `SKU code "${item.dto.skuCode}" already exists`,
-          });
-        } else {
-          dtosToInsert.push(item.dto);
-        }
-      }
-
-      if (dtosToInsert.length > 0) {
-        successfulCount = await this.batchInsertSkus(dtosToInsert);
-      }
-    }
-
-    errors.sort((a, b) => a.row - b.row);
-
-    return {
-      totalRows: records.length,
-      successful: successfulCount,
-      failed: errors.length,
-      errors,
-    };
-  }
-
-  private mapCsvRowToPlainDto(rawRow: Record<string, any>): Record<string, any> {
-    const plain: Record<string, any> = {};
-
-    for (const [key, rawValue] of Object.entries(rawRow)) {
-      if (!key) continue;
-      const normalizedKey = key.trim().toLowerCase().replace(/[\s_-]+/g, '');
-      const strVal = typeof rawValue === 'string' ? rawValue.trim() : rawValue;
-
-      if (normalizedKey === 'skucode') {
-        plain.skuCode = strVal;
-      } else if (normalizedKey === 'name') {
-        plain.name = strVal;
-      } else if (normalizedKey === 'description') {
-        plain.description = strVal === '' ? null : strVal;
-      } else if (normalizedKey === 'category') {
-        plain.category = strVal === '' ? null : strVal;
-      } else if (normalizedKey === 'unit') {
-        plain.unit = strVal === '' ? undefined : strVal;
-      } else if (normalizedKey === 'costprice' || normalizedKey === 'cost') {
-        plain.cost = this.parseNumericValue(strVal);
-      } else if (normalizedKey === 'sellingprice' || normalizedKey === 'price') {
-        plain.price = this.parseNumericValue(strVal);
-      } else if (normalizedKey === 'reorderthreshold') {
-        plain.reorderThreshold = this.parseNumericValue(strVal);
-      } else if (normalizedKey === 'safetystock') {
-        plain.safetyStock = this.parseNumericValue(strVal);
-      }
-    }
-
-    return plain;
-  }
-
-  private extractSkuCodeFromRaw(rawRow: Record<string, any>): string | null {
-    for (const [key, value] of Object.entries(rawRow)) {
-      if (key && key.trim().toLowerCase().replace(/[\s_-]+/g, '') === 'skucode') {
-        return typeof value === 'string' && value.trim() ? value.trim() : null;
-      }
-    }
-    return null;
-  }
-
-  private parseNumericValue(val: any): any {
-    if (val === '' || val === null || val === undefined) {
-      return undefined;
-    }
-    const num = Number(val);
-    return isNaN(num) ? val : num;
-  }
-
-  private formatValidationErrors(errors: ValidationError[]): string {
-    const messages: string[] = [];
-
-    const extractMessages = (errList: ValidationError[]) => {
-      for (const err of errList) {
-        if (err.constraints) {
-          messages.push(...Object.values(err.constraints));
-        }
-        if (err.children && err.children.length > 0) {
-          extractMessages(err.children);
-        }
-      }
-    };
-
-    extractMessages(errors);
-    return messages.join('; ');
-  }
-
-  private async findExistingSkuCodes(skuCodes: string[]): Promise<Set<string>> {
-    const existingSet = new Set<string>();
-    const chunkSize = 1000;
-
-    for (let i = 0; i < skuCodes.length; i += chunkSize) {
-      const chunk = skuCodes.slice(i, i + chunkSize);
-      const existing = await this.skuRepository.find({
-        where: { skuCode: In(chunk) },
-        select: ['skuCode'],
-      });
-      existing.forEach((item) => existingSet.add(item.skuCode));
-    }
-
-    return existingSet;
-  }
-
-  private async batchInsertSkus(dtos: CreateSkuDto[]): Promise<number> {
-    const entities = dtos.map((dto) => this.skuMapper.toEntity(dto));
-    const chunkSize = 500;
-    let savedCount = 0;
-
-    await this.skuRepository.manager.transaction(async (transactionalEntityManager) => {
-      for (let i = 0; i < entities.length; i += chunkSize) {
-        const chunk = entities.slice(i, i + chunkSize);
-        await transactionalEntityManager.save(Sku, chunk);
-        savedCount += chunk.length;
-      }
-    });
-
-    return savedCount;
-  }
-
-  async findAll(query: SkuQueryDto): Promise<{ data: SkuResponseDto[]; total: number }> {
-    const qb = this.skuRepository.createQueryBuilder('sku');
-    applySortAndSearch(qb, 'sku', query.sortBy, query.sortOrder, query.search, ['name', 'skuCode']);
     const result = await paginate(qb, query.page!, query.limit!);
     return { data: this.skuMapper.toResponseList(result.data), total: result.total };
   }
 
-  async findOne(id: string): Promise<SkuResponseDto> {
-    const skuEntity = await this.skuRepository.findOne({ where: { id } });
+  async findOne(tenantId: string, id: string): Promise<SkuResponseDto> {
+    const skuEntity = await this.skuRepository.findOne({ where: { id, tenantId } });
     if (!skuEntity) {
-      throw new NotFoundException(`SKU with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified product (SKU) does not exist.', code: 'SKU_NOT_FOUND' });
     }
     return this.skuMapper.toResponse(skuEntity);
   }
 
-  async update(id: string, updateSkuDto: UpdateSkuDto): Promise<SkuResponseDto> {
-    const skuEntity = await this.skuRepository.findOne({ where: { id } });
+  async update(tenantId: string, id: string, updateSkuDto: UpdateSkuDto): Promise<SkuResponseDto> {
+    const skuEntity = await this.skuRepository.findOne({ where: { id, tenantId } });
     if (!skuEntity) {
-      throw new NotFoundException(`SKU with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified product (SKU) does not exist.', code: 'SKU_NOT_FOUND' });
     }
 
-    if (updateSkuDto.skuCode && updateSkuDto.skuCode !== skuEntity.skuCode) {
+    if (updateSkuDto.sku && updateSkuDto.sku !== skuEntity.sku) {
       const existing = await this.skuRepository.findOne({
-        where: { skuCode: updateSkuDto.skuCode },
+        where: { sku: updateSkuDto.sku, tenantId },
       });
       if (existing) {
-        throw new ConflictException(
-          `SKU code "${updateSkuDto.skuCode}" already exists`,
-        );
+        throw new ConflictException({ message: `The SKU code "${updateSkuDto.sku}" is already in use.`, code: 'SKU_IN_USE' });
       }
     }
 
@@ -272,11 +78,143 @@ export class SkuService {
     return this.skuMapper.toResponse(savedEntity);
   }
 
-  async remove(id: string): Promise<void> {
-    const skuEntity = await this.skuRepository.findOne({ where: { id } });
+  async remove(tenantId: string, id: string): Promise<void> {
+    const skuEntity = await this.skuRepository.findOne({ where: { id, tenantId } });
     if (!skuEntity) {
-      throw new NotFoundException(`SKU with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified product (SKU) does not exist.', code: 'SKU_NOT_FOUND' });
     }
     await this.skuRepository.softRemove(skuEntity);
+  }
+
+  async importCsv(tenantId: string, buffer: Buffer): Promise<CsvImportResponseDto> {
+    if (!buffer || buffer.length === 0) {
+      throw new BadRequestException({ message: 'The uploaded CSV file appears to be empty.', code: 'EMPTY_CSV_FILE' });
+    }
+
+    let records: Record<string, string>[];
+    try {
+      // Strip UTF-8 BOM if present
+      const content = buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF
+        ? buffer.toString('utf-8', 3)
+        : buffer.toString('utf-8');
+
+      records = parse(content, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+        relax_column_count: true,
+      }) as Record<string, string>[];
+    } catch {
+      throw new BadRequestException({ message: 'The uploaded CSV file is improperly formatted. Please check its contents and try again.', code: 'MALFORMED_CSV' });
+    }
+
+    if (records.length === 0) {
+      throw new BadRequestException({ message: 'The uploaded CSV file does not contain any data rows to process.', code: 'NO_DATA_IN_CSV' });
+    }
+
+    const errors: CsvImportErrorDto[] = [];
+    const toCreate: CreateSkuDto[] = [];
+    const seenInCsv = new Set<string>();
+    const rowNumberOffset = 2; // header = row 1, first data row = row 2
+
+    // Collect all sku codes from CSV for batch DB check
+    const csvSkuCodes = records
+      .map((r) => (r.skuCode ?? '').trim().toUpperCase())
+      .filter(Boolean);
+
+    const existing = csvSkuCodes.length > 0
+      ? await this.skuRepository.find({
+          where: csvSkuCodes.map((code) => ({ sku: code, tenantId })),
+        })
+      : [];
+
+    const existingSet = new Set(existing.map((s) => s.sku));
+
+    for (let i = 0; i < records.length; i++) {
+      const row = records[i];
+      const rowNum = i + rowNumberOffset;
+      const rawSkuCode = (row.skuCode ?? '').trim();
+      const skuCode = rawSkuCode.toUpperCase();
+      const name = (row.name ?? '').trim();
+      const rawCost = (row.costPrice ?? '').trim();
+      const rawPrice = (row.sellingPrice ?? '').trim();
+
+      // Validate required fields
+      let hasError = false;
+
+      if (!skuCode) {
+        errors.push({ row: rowNum, skuCode: null, message: 'skuCode is required' });
+        hasError = true;
+      }
+      if (!name) {
+        errors.push({ row: rowNum, skuCode: skuCode || null, message: 'name is required' });
+        hasError = true;
+      }
+
+      const cost = Number(rawCost);
+      const price = Number(rawPrice);
+
+      if (!rawCost || isNaN(cost) || cost <= 0) {
+        errors.push({ row: rowNum, skuCode: skuCode || null, message: `Invalid costPrice value: "${rawCost}"` });
+        hasError = true;
+      }
+      if (!rawPrice || isNaN(price) || price <= 0) {
+        errors.push({ row: rowNum, skuCode: skuCode || null, message: `Invalid sellingPrice value: "${rawPrice}"` });
+        hasError = true;
+      }
+
+      if (hasError) continue;
+
+      // Check duplicate within CSV
+      if (seenInCsv.has(skuCode)) {
+        errors.push({ row: rowNum, skuCode: skuCode, message: `Duplicate SKU code "${skuCode}" found in CSV file` });
+        continue;
+      }
+      seenInCsv.add(skuCode);
+
+      // Check duplicate in DB
+      if (existingSet.has(skuCode)) {
+        errors.push({ row: rowNum, skuCode: skuCode, message: `SKU code "${skuCode}" already exists` });
+        continue;
+      }
+
+      // Only add to DB existence check set once we know it's valid
+      existingSet.add(skuCode);
+
+      toCreate.push({
+        sku: skuCode,
+        name,
+        cost,
+        price,
+      });
+    }
+
+    // Batch insert valid SKUs
+    let successful = 0;
+    const createdIds: string[] = [];
+    if (toCreate.length > 0) {
+      await this.dataSource.transaction(async (manager) => {
+        const entities = toCreate.map((dto) => {
+          const e = this.skuMapper.toEntity(dto);
+          e.tenantId = tenantId;
+          return e;
+        });
+        const saved = await manager.save(Sku, entities);
+        successful = entities.length;
+        createdIds.push(...saved.map((s) => s.id));
+      });
+    }
+
+    // Auto-initialize stock levels for all newly created SKUs
+    if (createdIds.length > 0) {
+      await this.stockLevelsService.autoInitializeForSkus(tenantId, createdIds);
+    }
+
+    return {
+      totalRows: records.length,
+      successful,
+      failed: errors.length,
+      errors,
+    };
   }
 }

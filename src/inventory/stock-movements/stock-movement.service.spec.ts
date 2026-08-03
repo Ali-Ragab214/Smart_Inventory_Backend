@@ -2,9 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StockMovementService } from './stock-movement.service';
 import { StockMovement } from './entities/stock-movement.entity';
-import { Sku } from '../../sku/entities/sku.entity';
+import { StockLevel } from '../stock-levels/entities/stock-level.entity';
 import { StockMovementMapper } from './mappers/stock-movement.mapper';
 import { MovementReason } from './enums/movement-reason.enum';
 
@@ -12,7 +13,8 @@ describe('StockMovementService', () => {
   let service: StockMovementService;
   let mockDataSource: any;
 
-  // Mock repositories inside the transaction manager
+  const TENANT_ID = 'tenant-uuid';
+
   const mockMovRepo = {
     findOne: jest.fn(),
     create: jest.fn((data) => ({ id: 'mock-movement-id', createdAt: new Date(), ...data })),
@@ -20,26 +22,24 @@ describe('StockMovementService', () => {
     createQueryBuilder: jest.fn(),
   };
 
-  const mockSkuRepo = {
+  const mockStockLevelRepo = {
     findOne: jest.fn(),
+    create: jest.fn((data) => ({ ...data })),
     save: jest.fn((entity) => Promise.resolve(entity)),
-    existsBy: jest.fn(),
   };
 
   const mockEntityManager = {
     getRepository: jest.fn((entityClass) => {
       if (entityClass === StockMovement) return mockMovRepo;
-      if (entityClass === Sku) return mockSkuRepo;
+      if (entityClass === StockLevel) return mockStockLevelRepo;
       return null;
     }),
   };
 
   beforeEach(async () => {
-    // Reset jest mocks
     jest.clearAllMocks();
 
     mockDataSource = {
-      // transaction executes the callback passing the entityManager
       transaction: jest.fn((cb) => cb(mockEntityManager)),
     };
 
@@ -52,12 +52,16 @@ describe('StockMovementService', () => {
           useValue: mockMovRepo,
         },
         {
-          provide: getRepositoryToken(Sku),
-          useValue: mockSkuRepo,
+          provide: getRepositoryToken(StockLevel),
+          useValue: mockStockLevelRepo,
         },
         {
           provide: DataSource,
           useValue: mockDataSource,
+        },
+        {
+          provide: EventEmitter2,
+          useValue: { emit: jest.fn() },
         },
       ],
     }).compile();
@@ -72,6 +76,7 @@ describe('StockMovementService', () => {
   describe('recordMovement', () => {
     const params = {
       skuId: 'sku-uuid',
+      warehouseId: 'wh-uuid',
       reason: MovementReason.PURCHASE_ORDER_RECEIPT,
       quantityChange: 10,
       idempotencyKey: 'idem-key-123',
@@ -83,6 +88,7 @@ describe('StockMovementService', () => {
       const existingMovement = {
         id: 'existing-id',
         skuId: 'sku-uuid',
+        warehouseId: 'wh-uuid',
         reason: MovementReason.PURCHASE_ORDER_RECEIPT,
         quantityChange: 10,
         balanceAfter: 15,
@@ -91,57 +97,61 @@ describe('StockMovementService', () => {
       };
       mockMovRepo.findOne.mockResolvedValue(existingMovement);
 
-      const result = await service.recordMovement(params);
+      const result = await service.recordMovement(TENANT_ID, params);
 
       expect(mockMovRepo.findOne).toHaveBeenCalledWith({
-        where: { idempotencyKey: 'idem-key-123' },
+        where: { idempotencyKey: 'idem-key-123', tenantId: TENANT_ID },
       });
-      // Should not lock Sku or do updates
-      expect(mockSkuRepo.findOne).not.toHaveBeenCalled();
+      expect(mockStockLevelRepo.findOne).not.toHaveBeenCalled();
       expect(result.id).toBe('existing-id');
       expect(result.balanceAfter).toBe(15);
     });
 
-    it('should throw NotFoundException if SKU does not exist', async () => {
+    it('should auto-create StockLevel if none exists (first movement for sku+warehouse)', async () => {
       mockMovRepo.findOne.mockResolvedValue(null);
-      mockSkuRepo.findOne.mockResolvedValue(null);
+      mockStockLevelRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.recordMovement(params)).rejects.toThrow(
-        NotFoundException,
-      );
-      expect(mockSkuRepo.findOne).toHaveBeenCalledWith({
-        where: { id: 'sku-uuid' },
-        lock: { mode: 'pessimistic_write' },
+      const result = await service.recordMovement(TENANT_ID, params);
+
+      expect(mockStockLevelRepo.create).toHaveBeenCalledWith({
+        skuId: 'sku-uuid',
+        warehouseId: 'wh-uuid',
+        tenantId: TENANT_ID,
+        quantity: 0,
+        reorderThreshold: 0,
+        safetyStock: 0,
       });
+      expect(mockStockLevelRepo.save).toHaveBeenCalled();
+      expect(result.skuId).toBe('sku-uuid');
+      expect(result.warehouseId).toBe('wh-uuid');
     });
 
     it('should throw BadRequestException if new balance would be negative', async () => {
-      const mockSku = { id: 'sku-uuid', currentQuantity: 5 };
+      const mockStockLevel = { id: 'sl-uuid', skuId: 'sku-uuid', warehouseId: 'wh-uuid', quantity: 5 };
       mockMovRepo.findOne.mockResolvedValue(null);
-      mockSkuRepo.findOne.mockResolvedValue(mockSku);
+      mockStockLevelRepo.findOne.mockResolvedValue(mockStockLevel);
 
-      // Attempting to subtract 10 when current stock is 5
       const negativeParams = { ...params, quantityChange: -10 };
 
-      await expect(service.recordMovement(negativeParams)).rejects.toThrow(
+      await expect(service.recordMovement(TENANT_ID, negativeParams)).rejects.toThrow(
         BadRequestException,
       );
     });
 
-    it('should successfully record movement and update SKU balance', async () => {
-      const mockSku = { id: 'sku-uuid', currentQuantity: 5 };
+    it('should successfully record movement and update StockLevel balance', async () => {
+      const mockStockLevel = { id: 'sl-uuid', skuId: 'sku-uuid', warehouseId: 'wh-uuid', quantity: 5 };
       mockMovRepo.findOne.mockResolvedValue(null);
-      mockSkuRepo.findOne.mockResolvedValue(mockSku);
+      mockStockLevelRepo.findOne.mockResolvedValue(mockStockLevel);
 
-      const result = await service.recordMovement(params);
+      const result = await service.recordMovement(TENANT_ID, params);
 
-      // Verify balance calculation
-      expect(mockSku.currentQuantity).toBe(15); // 5 + 10
-      expect(mockSkuRepo.save).toHaveBeenCalledWith(mockSku);
+      expect(mockStockLevel.quantity).toBe(15);
+      expect(mockStockLevelRepo.save).toHaveBeenCalledWith(mockStockLevel);
 
-      // Verify movement creation
       expect(mockMovRepo.create).toHaveBeenCalledWith({
         skuId: 'sku-uuid',
+        warehouseId: 'wh-uuid',
+        tenantId: TENANT_ID,
         reason: MovementReason.PURCHASE_ORDER_RECEIPT,
         quantityChange: 10,
         balanceAfter: 15,
@@ -155,21 +165,12 @@ describe('StockMovementService', () => {
       expect(mockMovRepo.save).toHaveBeenCalled();
       expect(result.balanceAfter).toBe(15);
       expect(result.skuId).toBe('sku-uuid');
+      expect(result.warehouseId).toBe('wh-uuid');
     });
   });
 
   describe('getHistoryForSku', () => {
-    it('should throw NotFoundException if SKU is not found', async () => {
-      mockSkuRepo.existsBy.mockResolvedValue(false);
-
-      await expect(
-        service.getHistoryForSku('invalid-sku', {}),
-      ).rejects.toThrow(NotFoundException);
-    });
-
     it('should return paginated list of mapped movements filterable by query parameters', async () => {
-      mockSkuRepo.existsBy.mockResolvedValue(true);
-
       const mockQueryBuilder = {
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
@@ -192,7 +193,7 @@ describe('StockMovementService', () => {
       };
       mockMovRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-      const result = await service.getHistoryForSku('sku-uuid', {
+      const result = await service.getHistoryForSku(TENANT_ID, 'sku-uuid', {
         reason: MovementReason.SALE,
         page: 1,
         limit: 10,
@@ -214,30 +215,34 @@ describe('StockMovementService', () => {
   });
 
   describe('reconcileBalance', () => {
-    it('should throw NotFoundException if SKU is not found', async () => {
-      mockSkuRepo.findOne.mockResolvedValue(null);
+    it('should throw NotFoundException if StockLevel is not found', async () => {
+      mockStockLevelRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.reconcileBalance('invalid-sku')).rejects.toThrow(
+      await expect(service.reconcileBalance(TENANT_ID, 'invalid-sku', 'wh-uuid')).rejects.toThrow(
         NotFoundException,
       );
     });
 
     it('should return reconciliation result comparing cached and ledger sum', async () => {
-      mockSkuRepo.findOne.mockResolvedValue({
-        id: 'sku-uuid',
-        currentQuantity: 12,
+      mockStockLevelRepo.findOne.mockResolvedValue({
+        id: 'sl-uuid',
+        skuId: 'sku-uuid',
+        warehouseId: 'wh-uuid',
+        quantity: 12,
       });
 
       const mockQueryBuilder = {
         select: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         getRawOne: jest.fn().mockResolvedValue({ total: '12' }),
       };
       mockMovRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-      const result = await service.reconcileBalance('sku-uuid');
+      const result = await service.reconcileBalance(TENANT_ID, 'sku-uuid', 'wh-uuid');
 
       expect(result.skuId).toBe('sku-uuid');
+      expect(result.warehouseId).toBe('wh-uuid');
       expect(result.cached).toBe(12);
       expect(result.calculated).toBe(12);
       expect(result.matches).toBe(true);
@@ -245,17 +250,7 @@ describe('StockMovementService', () => {
   });
 
   describe('getConsumptionSeries', () => {
-    it('should throw NotFoundException if SKU is not found', async () => {
-      mockSkuRepo.existsBy.mockResolvedValue(false);
-
-      await expect(
-        service.getConsumptionSeries('invalid-sku', 30),
-      ).rejects.toThrow(NotFoundException);
-    });
-
     it('should return daily net quantity rows parsed as integers', async () => {
-      mockSkuRepo.existsBy.mockResolvedValue(true);
-
       const mockQueryBuilder = {
         select: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
@@ -270,7 +265,7 @@ describe('StockMovementService', () => {
       };
       mockMovRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-      const result = await service.getConsumptionSeries('sku-uuid', 30);
+      const result = await service.getConsumptionSeries(TENANT_ID, 'sku-uuid', 'wh-uuid', 30);
 
       expect(mockMovRepo.createQueryBuilder).toHaveBeenCalledWith('sm');
       expect(mockQueryBuilder.where).toHaveBeenCalledWith(
@@ -278,8 +273,8 @@ describe('StockMovementService', () => {
         { skuId: 'sku-uuid' },
       );
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        "sm.createdAt >= NOW() - (:sinceDays * INTERVAL '1 day')",
-        { sinceDays: 30 },
+        'sm.warehouseId = :warehouseId',
+        { warehouseId: 'wh-uuid' },
       );
       expect(result).toEqual([
         { day: '2026-07-14', netChange: -3 },

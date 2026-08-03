@@ -1,10 +1,15 @@
-import { Column, Entity } from 'typeorm';
-import { AbstractEntity } from '../../shared/base.entity';
+import { Column, Entity, ManyToOne, JoinColumn } from 'typeorm';
+import { AbstractTenantEntity } from '../../shared/tenant.entity';
+import { Vendor } from './vendor.entity';
 
 @Entity('vendor_catalog_entries')
-export class VendorCatalogEntry extends AbstractEntity {
+export class VendorCatalogEntry extends AbstractTenantEntity {
   @Column('uuid')
   vendorId!: string;
+
+  @ManyToOne(() => Vendor, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'vendorId' })
+  vendor!: Vendor;
 
   @Column('uuid')
   skuId!: string;

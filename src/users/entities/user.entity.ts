@@ -1,14 +1,22 @@
-import { Entity, Column, Index, BeforeInsert, BeforeUpdate } from 'typeorm';
+import { Entity, Column, Index, BeforeInsert, BeforeUpdate, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { AbstractEntity } from '../../shared/base.entity';
+import { Warehouse } from '../../warehouses/entities/warehouse.entity';
+import { Tenant } from '../../tenants/entities/tenant.entity';
 
 export enum UserRole {
-  ADMIN = 'admin',
-  USER = 'user',
+  SUPER_ADMIN = 'super_admin',
+  TENANT_OWNER = 'tenant_owner',
+  WAREHOUSE_MANAGER = 'warehouse_manager',
+  BRANCH_MANAGER = 'branch_manager',
+  INVENTORY_CLERK = 'inventory_clerk',
 }
 
 @Entity('users')
 export class User extends AbstractEntity {
+  @Column({ type: 'varchar', length: 255 })
+  name!: string;
+
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 255 })
   email!: string;
@@ -18,39 +26,58 @@ export class User extends AbstractEntity {
   username!: string;
 
   /**
-   * Password is excluded from SELECT by default.
-   * Use createQueryBuilder().addSelect('user.password') when it is needed (auth flows only).
+   * Password hash is excluded from SELECT by default.
+   * Use createQueryBuilder().addSelect('user.passwordHash') when it is needed (auth flows only).
    */
-  @Column({ type: 'varchar', length: 255, select: false })
-  password!: string;
+  @Column({ type: 'varchar', length: 255, select: false, name: 'password_hash' })
+  passwordHash!: string;
 
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  firstName!: string | null;
-
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  lastName!: string | null;
-
-  @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
+  @Column({ type: 'enum', enum: UserRole, default: UserRole.TENANT_OWNER })
   role!: UserRole;
 
   @Column({ type: 'boolean', default: true })
   isActive!: boolean;
 
+  @ManyToOne(() => Warehouse, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'warehouse_id' })
+  warehouse!: Warehouse | null;
+
+  @Index('idx_users_warehouse')
+  @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
+  warehouseId!: string | null;
+
+  @ManyToOne(() => Tenant, (tenant) => tenant.users, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'tenant_id' })
+  tenant!: Tenant | null;
+
+  @Index('idx_users_tenant')
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
+  tenantId!: string | null;
+
+  @OneToMany(() => Warehouse, (warehouse) => warehouse.tenant)
+  ownedWarehouses!: Warehouse[];
+
+  @Column({ type: 'varchar', length: 255, nullable: true, select: false, name: 'reset_password_token' })
+  resetPasswordToken!: string | null;
+
+  @Column({ type: 'timestamp', nullable: true, select: false, name: 'reset_password_expires' })
+  resetPasswordExpires!: Date | null;
+
   /**
    * Hashes the password before any INSERT or UPDATE.
-   * Because `password` has `select: false`, partial updates that do not
+   * Because `passwordHash` has `select: false`, partial updates that do not
    * touch the password field will not have the property set, so no
    * re-hashing will occur.
    */
   @BeforeInsert()
   @BeforeUpdate()
   async hashPassword(): Promise<void> {
-    if (this.password) {
-      this.password = await bcrypt.hash(this.password, 10);
+    if (this.passwordHash) {
+      this.passwordHash = await bcrypt.hash(this.passwordHash, 10);
     }
   }
 
   async comparePassword(plain: string): Promise<boolean> {
-    return bcrypt.compare(plain, this.password);
+    return bcrypt.compare(plain, this.passwordHash);
   }
 }

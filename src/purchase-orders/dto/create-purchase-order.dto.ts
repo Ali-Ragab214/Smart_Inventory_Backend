@@ -32,6 +32,10 @@ export class CreatePurchaseOrderDto {
   @IsNotEmpty()
   vendorId!: string;
 
+  @IsUUID()
+  @IsNotEmpty()
+  warehouseId!: string;
+
   @IsArray()
   @ArrayMinSize(1, { message: 'lineItems must contain at least one item' })
   @ValidateNested({ each: true })

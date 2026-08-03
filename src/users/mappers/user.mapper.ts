@@ -7,25 +7,26 @@ import { UserResponseDto } from '../dto/user-response.dto';
 export class UserMapper {
   toEntity(dto: CreateUserDto): User {
     const user = new User();
+    user.name = dto.name?.trim() ?? '';
     user.email = dto.email.toLowerCase().trim();
     user.username = dto.username.trim();
-    user.password = dto.password; // raw — hashed by @BeforeInsert hook on entity
-    user.firstName = dto.firstName?.trim() ?? null;
-    user.lastName = dto.lastName?.trim() ?? null;
-    user.role = UserRole.USER;
+    user.passwordHash = dto.password; // raw — hashed by @BeforeInsert hook on entity
+    user.role = dto.role ?? UserRole.TENANT_OWNER;
     user.isActive = true;
+    user.warehouseId = dto.warehouseId ?? null;
     return user;
   }
 
   toResponse(entity: User): UserResponseDto {
     const dto = new UserResponseDto();
     dto.id = entity.id;
+    dto.name = entity.name;
     dto.email = entity.email;
     dto.username = entity.username;
-    dto.firstName = entity.firstName;
-    dto.lastName = entity.lastName;
     dto.role = entity.role;
     dto.isActive = entity.isActive;
+    dto.tenantId = entity.tenantId;
+    dto.warehouseId = entity.warehouseId;
     dto.createdAt = entity.createdAt;
     dto.updatedAt = entity.updatedAt;
     return dto;
