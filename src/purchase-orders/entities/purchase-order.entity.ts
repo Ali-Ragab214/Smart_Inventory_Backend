@@ -1,10 +1,10 @@
 import { Column, Entity, Index, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
-import { AbstractEntity } from '../../shared/base.entity';
+import { AbstractTenantEntity } from '../../shared/tenant.entity';
 import { Warehouse } from '../../warehouses/entities/warehouse.entity';
 import { PurchaseOrderLineItem } from './purchase-order-line-item.entity';
 
 @Entity('purchase_orders')
-export class PurchaseOrder extends AbstractEntity {
+export class PurchaseOrder extends AbstractTenantEntity {
   @Column('uuid')
   vendorId!: string;
 

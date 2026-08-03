@@ -33,6 +33,7 @@ export class UserMapper {
     dto.username = entity.username;
     dto.role = entity.role;
     dto.isActive = entity.isActive;
+    dto.tenantId = entity.tenantId;
     dto.warehouseId = entity.warehouseId;
     dto.createdAt = entity.createdAt;
     dto.updatedAt = entity.updatedAt;

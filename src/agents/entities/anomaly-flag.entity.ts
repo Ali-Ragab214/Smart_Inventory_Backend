@@ -1,9 +1,9 @@
 import { Column, Entity, ManyToOne, JoinColumn } from 'typeorm';
-import { AbstractEntity } from '../../shared/base.entity';
+import { AbstractTenantEntity } from '../../shared/tenant.entity';
 import { User } from '../../users/entities/user.entity';
 
 @Entity('anomaly_flags')
-export class AnomalyFlag extends AbstractEntity {
+export class AnomalyFlag extends AbstractTenantEntity {
   @Column('uuid', { nullable: true })
   agentRunId!: string | null;
 

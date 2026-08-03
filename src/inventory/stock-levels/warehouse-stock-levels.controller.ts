@@ -10,6 +10,8 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { CurrentUser } from '../../auth/decorators/current-user/current-user.decorator';
+import { UserResponseDto } from '../../users/dto/user-response.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -37,8 +39,9 @@ export class WarehouseStockLevelsController {
   async findAll(
     @Param('warehouseId', ParseUUIDPipe) warehouseId: string,
     @Query() query: StockLevelQueryDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const { data, total } = await this.stockLevelsService.findByWarehouse(warehouseId, query);
+    const { data, total } = await this.stockLevelsService.findByWarehouse(user.tenantId!, warehouseId, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
@@ -51,8 +54,9 @@ export class WarehouseStockLevelsController {
   async findOne(
     @Param('warehouseId', ParseUUIDPipe) warehouseId: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.stockLevelsService.findOneByWarehouse(warehouseId, id);
+    const data = await this.stockLevelsService.findOneByWarehouse(user.tenantId!, warehouseId, id);
     return successResponse(data);
   }
 
@@ -65,8 +69,9 @@ export class WarehouseStockLevelsController {
     @Param('warehouseId', ParseUUIDPipe) warehouseId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateStockLevelDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.stockLevelsService.update(id, dto);
+    const data = await this.stockLevelsService.update(user.tenantId!, id, dto);
     return successResponse(data);
   }
 
@@ -74,8 +79,8 @@ export class WarehouseStockLevelsController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Initialize stock levels for all SKUs missing in this warehouse' })
   @ApiCreatedResponse({ description: 'Stock levels initialized' })
-  async initialize(@Param('warehouseId', ParseUUIDPipe) warehouseId: string) {
-    const count = await this.stockLevelsService.initializeForWarehouse(warehouseId);
+  async initialize(@Param('warehouseId', ParseUUIDPipe) warehouseId: string, @CurrentUser() user: UserResponseDto) {
+    const count = await this.stockLevelsService.initializeForWarehouse(user.tenantId!, warehouseId);
     return successResponse({ initialized: count });
   }
 }

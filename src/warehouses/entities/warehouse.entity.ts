@@ -1,5 +1,5 @@
 import { Column, Entity, JoinColumn, ManyToOne, Index } from 'typeorm';
-import { AbstractEntity } from '../../shared/base.entity';
+import { AbstractTenantEntity } from '../../shared/tenant.entity';
 import { User } from '../../users/entities/user.entity';
 
 export enum WarehouseStatus {
@@ -8,7 +8,7 @@ export enum WarehouseStatus {
 }
 
 @Entity('warehouses')
-export class Warehouse extends AbstractEntity {
+export class Warehouse extends AbstractTenantEntity {
   @Column({ type: 'varchar', length: 255 })
   name!: string;
 
@@ -22,13 +22,7 @@ export class Warehouse extends AbstractEntity {
   })
   status!: WarehouseStatus;
 
-  @ManyToOne(() => User, (user) => user.ownedWarehouses, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'tenant_id' })
-  tenant!: User;
-
-  @Index('idx_warehouses_tenant')
-  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
-  tenantId!: string;
+  // Removed tenant relation to User, as it is now inherited from AbstractTenantEntity
 
   @Column({ name: 'is_main', type: 'boolean', default: false })
   isMain!: boolean;

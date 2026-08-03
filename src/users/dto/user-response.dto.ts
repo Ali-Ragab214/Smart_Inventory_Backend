@@ -11,6 +11,7 @@ export class UserResponseDto {
   username!: string;
   role!: UserRole;
   isActive!: boolean;
+  tenantId!: string | null;
   warehouseId!: string | null;
   createdAt!: Date;
   updatedAt!: Date;

@@ -1,4 +1,4 @@
-import { IsOptional, IsUUID } from 'class-validator';
+import { IsOptional, IsString, IsUUID } from 'class-validator';
 import { PaginationQueryDto } from '../../../utils/query.dto';
 
 export class StockLevelQueryDto extends PaginationQueryDto {
@@ -7,6 +7,6 @@ export class StockLevelQueryDto extends PaginationQueryDto {
   skuId?: string;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
   warehouseId?: string;
 }

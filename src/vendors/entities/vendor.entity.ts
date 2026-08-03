@@ -1,8 +1,8 @@
 import { Column, Entity } from 'typeorm';
-import { AbstractEntity } from '../../shared/base.entity';
+import { AbstractTenantEntity } from '../../shared/tenant.entity';
 
 @Entity('vendors')
-export class Vendor extends AbstractEntity {
+export class Vendor extends AbstractTenantEntity {
   @Column({ length: 255 })
   name!: string;
 

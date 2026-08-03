@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
+import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { UserMapper } from './mappers/user.mapper';
 import { CreateUserDto } from './dto/create-user.dto';
 
@@ -25,6 +26,10 @@ describe('UsersService', () => {
         UserMapper,
         {
           provide: getRepositoryToken(User),
+          useValue: mockRepository,
+        },
+        {
+          provide: getRepositoryToken(Warehouse),
           useValue: mockRepository,
         },
       ],

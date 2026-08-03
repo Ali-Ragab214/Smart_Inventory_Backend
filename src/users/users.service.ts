@@ -5,9 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, QueryFailedError } from 'typeorm';
 import { User, UserRole } from './entities/user.entity';
 import { Warehouse } from '../warehouses/entities/warehouse.entity';
+import { Tenant } from '../tenants/entities/tenant.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -26,6 +27,8 @@ export class UsersService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Warehouse)
     private readonly warehouseRepository: Repository<Warehouse>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepository: Repository<Tenant>,
     private readonly userMapper: UserMapper,
   ) {}
 
@@ -33,50 +36,64 @@ export class UsersService {
    * Create a new user with unique email and username checks.
    * If role is TENANT_OWNER and warehouseName is provided, creates a warehouse automatically.
    */
-  async create(createUserDto: CreateUserDto): Promise<UserResponseDto> {
+  async create(currentUser: UserResponseDto | null, createUserDto: CreateUserDto): Promise<UserResponseDto> {
     const emailTaken = await this.userRepository.existsBy({
       email: createUserDto.email,
     });
     if (emailTaken) {
-      throw new ConflictException('Email already in use');
+      throw new ConflictException({ message: 'This email address is already registered to another account.', code: 'EMAIL_IN_USE' });
     }
 
     const usernameTaken = await this.userRepository.existsBy({
       username: createUserDto.username,
     });
     if (usernameTaken) {
-      throw new ConflictException('Username already in use');
+      throw new ConflictException({ message: 'This username is already taken. Please choose another one.', code: 'USERNAME_IN_USE' });
     }
 
     const user = this.userMapper.toEntity(createUserDto);
-    let saved = await this.userRepository.save(user);
 
-    // Auto-create warehouse for tenant_owner registration
-    if (!createUserDto.warehouseId && createUserDto.warehouseName && saved.role === UserRole.TENANT_OWNER) {
-      const warehouse = this.warehouseRepository.create({
-        name: createUserDto.warehouseName,
-        location: createUserDto.warehouseLocation ?? null,
-        tenantId: saved.id,
-        isMain: true,
-      });
-      const savedWarehouse = await this.warehouseRepository.save(warehouse);
-      
-      saved.warehouseId = savedWarehouse.id;
-      saved = await this.userRepository.save(saved);
-      this.logger.log(`Warehouse created for new tenant: ${savedWarehouse.id}`);
+    if (currentUser?.tenantId && user.role !== UserRole.TENANT_OWNER) {
+      user.tenantId = currentUser.tenantId;
     }
 
+    // Auto-create tenant and warehouse for tenant_owner registration BEFORE saving the user
+    // to avoid multiple saves which would trigger double-hashing of the password.
+    if (user.role === UserRole.TENANT_OWNER) {
+      const tenant = this.tenantRepository.create({
+        name: createUserDto.name + "'s Organization",
+      });
+      const savedTenant = await this.tenantRepository.save(tenant);
+      user.tenantId = savedTenant.id;
+      this.logger.log(`Tenant created: ${savedTenant.id}`);
+
+      if (!createUserDto.warehouseId && createUserDto.warehouseName) {
+        const warehouse = this.warehouseRepository.create({
+          name: createUserDto.warehouseName,
+          location: createUserDto.warehouseLocation ?? null,
+          tenantId: savedTenant.id,
+          isMain: true,
+        });
+        const savedWarehouse = await this.warehouseRepository.save(warehouse);
+        user.warehouseId = savedWarehouse.id;
+        this.logger.log(`Warehouse created for new tenant: ${savedWarehouse.id}`);
+      }
+    }
+
+    const saved = await this.userRepository.save(user);
     this.logger.log(`User created: ${saved.id}`);
     return this.userMapper.toResponse(saved);
   }
 
   /**
-   * Return all active (non-deleted) users.
+   * Return all active (non-deleted) users scoped to tenant.
    */
-  async findAll(query: PaginationQueryDto): Promise<{ data: UserResponseDto[]; total: number }> {
-    const qb = this.userRepository
-      .createQueryBuilder('user')
-      .where('user.isActive = :isActive', { isActive: true });
+  async findAll(currentUser: UserResponseDto, query: PaginationQueryDto): Promise<{ data: UserResponseDto[]; total: number }> {
+    const qb = this.userRepository.createQueryBuilder('user');
+
+    if (currentUser.role !== UserRole.SUPER_ADMIN) {
+      qb.andWhere('user.tenantId = :tenantId', { tenantId: currentUser.tenantId });
+    }
     applySortAndSearch(qb, 'user', query.sortBy, query.sortOrder, query.search, ['username', 'email', 'name']);
     const result = await paginate(qb, query.page!, query.limit!);
     return { data: this.userMapper.toResponseList(result.data), total: result.total };
@@ -85,10 +102,14 @@ export class UsersService {
   /**
    * Find a single user by UUID and return a safe response DTO.
    */
-  async findById(id: string): Promise<UserResponseDto> {
-    const user = await this.userRepository.findOne({ where: { id } });
+  async findById(currentUser: UserResponseDto | null, id: string): Promise<UserResponseDto> {
+    const query: any = { id };
+    if (currentUser && currentUser.role !== UserRole.SUPER_ADMIN) {
+      query.tenantId = currentUser.tenantId;
+    }
+    const user = await this.userRepository.findOne({ where: query });
     if (!user) {
-      throw new NotFoundException(`User with ID "${id}" not found`);
+      throw new NotFoundException({ message: "We couldn't find this user's account.", code: 'USER_NOT_FOUND' });
     }
     return this.userMapper.toResponse(user);
   }
@@ -121,46 +142,75 @@ export class UsersService {
       .getOne();
   }
 
+  async findByResetTokenForAuth(token: string): Promise<User | null> {
+    return this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .addSelect('user.resetPasswordToken')
+      .addSelect('user.resetPasswordExpires')
+      .where('user.resetPasswordToken = :token', { token })
+      .getOne();
+  }
+
+  async saveRawUser(user: User): Promise<User> {
+    return this.userRepository.save(user);
+  }
+
+
   /**
    * Update a user's profile fields.
    */
-  async update(id: string, updateUserDto: UpdateUserDto): Promise<UserResponseDto> {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) {
-      throw new NotFoundException(`User with ID "${id}" not found`);
+  async update(currentUser: UserResponseDto, id: string, updateUserDto: UpdateUserDto): Promise<UserResponseDto> {
+    const query: any = { id };
+    if (currentUser.role !== UserRole.SUPER_ADMIN) {
+      query.tenantId = currentUser.tenantId;
+    }
+    const existing = await this.userRepository.findOne({ where: query });
+    if (!existing) {
+      throw new NotFoundException({ message: "We couldn't find this user's account.", code: 'USER_NOT_FOUND' });
     }
 
-    if (updateUserDto.email && updateUserDto.email !== user.email) {
+    const updates: Partial<User> = {};
+
+    if (updateUserDto.email && updateUserDto.email !== existing.email) {
       const emailTaken = await this.userRepository.existsBy({ email: updateUserDto.email });
       if (emailTaken) {
-        throw new ConflictException('Email already in use');
+        throw new ConflictException({ message: 'This email address is already registered to another account.', code: 'EMAIL_IN_USE' });
       }
-      user.email = updateUserDto.email.toLowerCase().trim();
+      updates.email = updateUserDto.email.toLowerCase().trim();
     }
 
-    if (updateUserDto.username && updateUserDto.username !== user.username) {
+    if (updateUserDto.username && updateUserDto.username !== existing.username) {
       const usernameTaken = await this.userRepository.existsBy({ username: updateUserDto.username });
       if (usernameTaken) {
-        throw new ConflictException('Username already in use');
+        throw new ConflictException({ message: 'This username is already taken. Please choose another one.', code: 'USERNAME_IN_USE' });
       }
-      user.username = updateUserDto.username.trim();
+      updates.username = updateUserDto.username.trim();
     }
 
     if (updateUserDto.name !== undefined) {
-      user.name = updateUserDto.name?.trim() ?? '';
+      updates.name = updateUserDto.name?.trim() ?? '';
     }
 
     if (updateUserDto.warehouseId !== undefined) {
-      user.warehouseId = updateUserDto.warehouseId ?? null;
+      updates.warehouseId = updateUserDto.warehouseId ?? null;
     }
 
     if (updateUserDto.role !== undefined) {
-      user.role = updateUserDto.role;
+      updates.role = updateUserDto.role;
     }
 
-    const saved = await this.userRepository.save(user);
-    this.logger.log(`User updated: ${saved.id}`);
-    return this.userMapper.toResponse(saved);
+    if (updateUserDto.isActive !== undefined) {
+      updates.isActive = updateUserDto.isActive;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await this.userRepository.update(id, updates);
+    }
+
+    const saved = await this.userRepository.findOne({ where: { id } });
+    this.logger.log(`User updated: ${saved!.id}`);
+    return this.userMapper.toResponse(saved!);
   }
 
   async updateMe(id: string, updateProfileDto: UpdateProfileDto): Promise<UserResponseDto> {
@@ -193,12 +243,17 @@ export class UsersService {
   /**
    * Soft-delete a user by ID (sets deletedAt; record is preserved in DB).
    */
-  async remove(id: string): Promise<void> {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) {
-      throw new NotFoundException(`User with ID "${id}" not found`);
+  async remove(currentUser: UserResponseDto, id: string): Promise<void> {
+    const query: any = { id };
+    if (currentUser.role !== UserRole.SUPER_ADMIN) {
+      query.tenantId = currentUser.tenantId;
     }
-    await this.userRepository.softRemove(user);
-    this.logger.log(`User soft-deleted: ${id}`);
+    const user = await this.userRepository.findOne({ where: query });
+    if (!user) {
+      throw new NotFoundException({ message: "We couldn't find this user's account.", code: 'USER_NOT_FOUND' });
+    }
+    user.isActive = false;
+    await this.userRepository.save(user);
+    this.logger.log(`User deactivated: ${id}`);
   }
 }

@@ -23,50 +23,48 @@ export class SkuService {
     private readonly stockLevelsService: StockLevelsService,
   ) {}
 
-  async create(createSkuDto: CreateSkuDto): Promise<SkuResponseDto> {
+  async create(tenantId: string, createSkuDto: CreateSkuDto): Promise<SkuResponseDto> {
     const existing = await this.skuRepository.findOne({
-      where: { sku: createSkuDto.sku },
+      where: { sku: createSkuDto.sku, tenantId },
     });
     if (existing) {
-      throw new ConflictException(
-        `SKU "${createSkuDto.sku}" already exists`,
-      );
+      throw new ConflictException({ message: `The SKU code "${createSkuDto.sku}" is already in use.`, code: 'SKU_IN_USE' });
     }
     const skuEntity = this.skuMapper.toEntity(createSkuDto);
+    skuEntity.tenantId = tenantId;
     const savedEntity = await this.skuRepository.save(skuEntity);
-    await this.stockLevelsService.autoInitializeForSku(savedEntity.id);
+    await this.stockLevelsService.autoInitializeForSku(tenantId, savedEntity.id);
     return this.skuMapper.toResponse(savedEntity);
   }
 
-  async findAll(query: SkuQueryDto): Promise<{ data: SkuResponseDto[]; total: number }> {
-    const qb = this.skuRepository.createQueryBuilder('sku');
+  async findAll(tenantId: string, query: SkuQueryDto): Promise<{ data: SkuResponseDto[]; total: number }> {
+    const qb = this.skuRepository.createQueryBuilder('sku')
+      .where('sku.tenantId = :tenantId', { tenantId });
     applySortAndSearch(qb, 'sku', query.sortBy, query.sortOrder, query.search, ['name', 'sku']);
     const result = await paginate(qb, query.page!, query.limit!);
     return { data: this.skuMapper.toResponseList(result.data), total: result.total };
   }
 
-  async findOne(id: string): Promise<SkuResponseDto> {
-    const skuEntity = await this.skuRepository.findOne({ where: { id } });
+  async findOne(tenantId: string, id: string): Promise<SkuResponseDto> {
+    const skuEntity = await this.skuRepository.findOne({ where: { id, tenantId } });
     if (!skuEntity) {
-      throw new NotFoundException(`SKU with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified product (SKU) does not exist.', code: 'SKU_NOT_FOUND' });
     }
     return this.skuMapper.toResponse(skuEntity);
   }
 
-  async update(id: string, updateSkuDto: UpdateSkuDto): Promise<SkuResponseDto> {
-    const skuEntity = await this.skuRepository.findOne({ where: { id } });
+  async update(tenantId: string, id: string, updateSkuDto: UpdateSkuDto): Promise<SkuResponseDto> {
+    const skuEntity = await this.skuRepository.findOne({ where: { id, tenantId } });
     if (!skuEntity) {
-      throw new NotFoundException(`SKU with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified product (SKU) does not exist.', code: 'SKU_NOT_FOUND' });
     }
 
     if (updateSkuDto.sku && updateSkuDto.sku !== skuEntity.sku) {
       const existing = await this.skuRepository.findOne({
-        where: { sku: updateSkuDto.sku },
+        where: { sku: updateSkuDto.sku, tenantId },
       });
       if (existing) {
-        throw new ConflictException(
-          `SKU "${updateSkuDto.sku}" already exists`,
-        );
+        throw new ConflictException({ message: `The SKU code "${updateSkuDto.sku}" is already in use.`, code: 'SKU_IN_USE' });
       }
     }
 
@@ -75,17 +73,17 @@ export class SkuService {
     return this.skuMapper.toResponse(savedEntity);
   }
 
-  async remove(id: string): Promise<void> {
-    const skuEntity = await this.skuRepository.findOne({ where: { id } });
+  async remove(tenantId: string, id: string): Promise<void> {
+    const skuEntity = await this.skuRepository.findOne({ where: { id, tenantId } });
     if (!skuEntity) {
-      throw new NotFoundException(`SKU with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The specified product (SKU) does not exist.', code: 'SKU_NOT_FOUND' });
     }
     await this.skuRepository.softRemove(skuEntity);
   }
 
-  async importCsv(buffer: Buffer): Promise<CsvImportResponseDto> {
+  async importCsv(tenantId: string, buffer: Buffer): Promise<CsvImportResponseDto> {
     if (!buffer || buffer.length === 0) {
-      throw new BadRequestException('CSV file is empty');
+      throw new BadRequestException({ message: 'The uploaded CSV file appears to be empty.', code: 'EMPTY_CSV_FILE' });
     }
 
     let records: Record<string, string>[];
@@ -102,11 +100,11 @@ export class SkuService {
         relax_column_count: true,
       }) as Record<string, string>[];
     } catch {
-      throw new BadRequestException('Malformed CSV file');
+      throw new BadRequestException({ message: 'The uploaded CSV file is improperly formatted. Please check its contents and try again.', code: 'MALFORMED_CSV' });
     }
 
     if (records.length === 0) {
-      throw new BadRequestException('CSV file contains no data rows');
+      throw new BadRequestException({ message: 'The uploaded CSV file does not contain any data rows to process.', code: 'NO_DATA_IN_CSV' });
     }
 
     const errors: CsvImportErrorDto[] = [];
@@ -121,7 +119,7 @@ export class SkuService {
 
     const existing = csvSkuCodes.length > 0
       ? await this.skuRepository.find({
-          where: csvSkuCodes.map((code) => ({ sku: code })),
+          where: csvSkuCodes.map((code) => ({ sku: code, tenantId })),
         })
       : [];
 
@@ -191,7 +189,11 @@ export class SkuService {
     const createdIds: string[] = [];
     if (toCreate.length > 0) {
       await this.dataSource.transaction(async (manager) => {
-        const entities = toCreate.map((dto) => this.skuMapper.toEntity(dto));
+        const entities = toCreate.map((dto) => {
+          const e = this.skuMapper.toEntity(dto);
+          e.tenantId = tenantId;
+          return e;
+        });
         const saved = await manager.save(Sku, entities);
         successful = entities.length;
         createdIds.push(...saved.map((s) => s.id));
@@ -200,7 +202,7 @@ export class SkuService {
 
     // Auto-initialize stock levels for all newly created SKUs
     if (createdIds.length > 0) {
-      await this.stockLevelsService.autoInitializeForSkus(createdIds);
+      await this.stockLevelsService.autoInitializeForSkus(tenantId, createdIds);
     }
 
     return {

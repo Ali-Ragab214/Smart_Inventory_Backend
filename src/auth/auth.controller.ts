@@ -4,6 +4,8 @@ import { CreateUserDto } from '../users/dto/create-user.dto';
 import { LoginUserDto } from './dto/login-dto';
 import { Public } from './public.decorator';
 import { successResponse } from '../utils/response.util';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -21,6 +23,20 @@ export class AuthController {
   async login(@Body() loginUserDto: LoginUserDto) {
     const { emailOrUsername, password } = loginUserDto;
     const data = await this.authService.signIn(emailOrUsername, password);
+    return successResponse(data);
+  }
+
+  @Public()
+  @Post('forgot-password')
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    const data = await this.authService.forgotPassword(forgotPasswordDto);
+    return successResponse(data);
+  }
+
+  @Public()
+  @Post('reset-password')
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    const data = await this.authService.resetPassword(resetPasswordDto);
     return successResponse(data);
   }
 }

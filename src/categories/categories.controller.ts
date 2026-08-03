@@ -10,6 +10,8 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
+import { UserResponseDto } from '../users/dto/user-response.dto';
 import {
   ApiBadRequestResponse,
   ApiCreatedResponse,
@@ -34,16 +36,16 @@ export class CategoriesController {
   @ApiOperation({ summary: 'Create a category' })
   @ApiCreatedResponse({ type: CategoryResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request body' })
-  async create(@Body() dto: CreateCategoryDto) {
-    const data = await this.categoriesService.create(dto);
+  async create(@Body() dto: CreateCategoryDto, @CurrentUser() user: UserResponseDto) {
+    const data = await this.categoriesService.create(user.tenantId!, dto);
     return successResponse(data);
   }
 
   @Get()
   @ApiOperation({ summary: 'List all categories' })
   @ApiOkResponse({ type: CategoryResponseDto, isArray: true })
-  async findAll() {
-    const data = await this.categoriesService.findAll();
+  async findAll(@CurrentUser() user: UserResponseDto) {
+    const data = await this.categoriesService.findAll(user.tenantId!);
     return successResponse(data);
   }
 
@@ -52,8 +54,8 @@ export class CategoriesController {
   @ApiParam({ name: 'id', description: 'Category UUID' })
   @ApiOkResponse({ type: CategoryResponseDto })
   @ApiNotFoundResponse({ description: 'Category not found' })
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
-    const data = await this.categoriesService.findOne(id);
+  async findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {
+    const data = await this.categoriesService.findOne(user.tenantId!, id);
     return successResponse(data);
   }
 
@@ -63,8 +65,8 @@ export class CategoriesController {
   @ApiOkResponse({ type: CategoryResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request body' })
   @ApiNotFoundResponse({ description: 'Category not found' })
-  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCategoryDto) {
-    const data = await this.categoriesService.update(id, dto);
+  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCategoryDto, @CurrentUser() user: UserResponseDto) {
+    const data = await this.categoriesService.update(user.tenantId!, id, dto);
     return successResponse(data);
   }
 
@@ -74,8 +76,8 @@ export class CategoriesController {
   @ApiParam({ name: 'id', description: 'Category UUID' })
   @ApiOkResponse({ description: 'Category deleted successfully' })
   @ApiNotFoundResponse({ description: 'Category not found' })
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.categoriesService.remove(id);
+  async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {
+    await this.categoriesService.remove(user.tenantId!, id);
     return successResponse(null);
   }
 }

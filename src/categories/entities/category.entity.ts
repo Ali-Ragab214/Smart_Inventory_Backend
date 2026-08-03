@@ -1,8 +1,8 @@
 import { Column, Entity, Index } from 'typeorm';
-import { AbstractEntity } from '../../shared/base.entity';
+import { AbstractTenantEntity } from '../../shared/tenant.entity';
 
 @Entity('categories')
-export class Category extends AbstractEntity {
+export class Category extends AbstractTenantEntity {
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 255 })
   name!: string;

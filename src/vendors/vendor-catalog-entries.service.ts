@@ -23,29 +23,31 @@ export class VendorCatalogEntriesService {
   ) {}
 
   async create(
+    tenantId: string,
     vendorId: string,
     dto: CreateVendorCatalogEntryDto,
   ): Promise<VendorCatalogEntryResponseDto> {
     const existing = await this.catalogRepo.findOne({
-      where: { vendorId, skuId: dto.skuId },
+      where: { vendorId, skuId: dto.skuId, tenantId },
     });
     if (existing) {
-      throw new ConflictException(
-        `Catalog entry for vendor "${vendorId}" and SKU "${dto.skuId}" already exists`,
-      );
+      throw new ConflictException({ message: 'A catalog entry for this product and vendor already exists.', code: 'DUPLICATE_CATALOG_ENTRY' });
     }
 
     const entry = this.mapper.toEntity(dto, vendorId);
+    entry.tenantId = tenantId;
     const saved = await this.catalogRepo.save(entry);
     return this.mapper.toResponse(saved);
   }
 
   async findAll(
+    tenantId: string,
     vendorId: string,
     query: VendorCatalogEntryQueryDto,
   ): Promise<{ data: VendorCatalogEntryResponseDto[]; total: number }> {
     const qb = this.catalogRepo.createQueryBuilder('entry');
-    qb.where('entry.vendorId = :vendorId', { vendorId });
+    qb.where('entry.vendorId = :vendorId', { vendorId })
+      .andWhere('entry.tenantId = :tenantId', { tenantId });
 
     if (query.skuId) {
       qb.andWhere('entry.skuId = :skuId', { skuId: query.skuId });
@@ -56,26 +58,23 @@ export class VendorCatalogEntriesService {
     return { data: this.mapper.toResponseList(result.data), total: result.total };
   }
 
-  async findOne(vendorId: string, id: string): Promise<VendorCatalogEntryResponseDto> {
-    const entry = await this.catalogRepo.findOne({ where: { id, vendorId } });
+  async findOne(tenantId: string, vendorId: string, id: string): Promise<VendorCatalogEntryResponseDto> {
+    const entry = await this.catalogRepo.findOne({ where: { id, vendorId, tenantId } });
     if (!entry) {
-      throw new NotFoundException(
-        `Catalog entry with ID "${id}" not found for vendor "${vendorId}"`,
-      );
+      throw new NotFoundException({ message: "We couldn't find a catalog entry for this product and vendor combination.", code: 'CATALOG_ENTRY_NOT_FOUND' });
     }
     return this.mapper.toResponse(entry);
   }
 
   async update(
+    tenantId: string,
     vendorId: string,
     id: string,
     dto: UpdateVendorCatalogEntryDto,
   ): Promise<VendorCatalogEntryResponseDto> {
-    const entry = await this.catalogRepo.findOne({ where: { id, vendorId } });
+    const entry = await this.catalogRepo.findOne({ where: { id, vendorId, tenantId } });
     if (!entry) {
-      throw new NotFoundException(
-        `Catalog entry with ID "${id}" not found for vendor "${vendorId}"`,
-      );
+      throw new NotFoundException({ message: "We couldn't find a catalog entry for this product and vendor combination.", code: 'CATALOG_ENTRY_NOT_FOUND' });
     }
 
     const updated = this.mapper.updateEntity(entry, dto);
@@ -83,12 +82,10 @@ export class VendorCatalogEntriesService {
     return this.mapper.toResponse(saved);
   }
 
-  async remove(vendorId: string, id: string): Promise<void> {
-    const entry = await this.catalogRepo.findOne({ where: { id, vendorId } });
+  async remove(tenantId: string, vendorId: string, id: string): Promise<void> {
+    const entry = await this.catalogRepo.findOne({ where: { id, vendorId, tenantId } });
     if (!entry) {
-      throw new NotFoundException(
-        `Catalog entry with ID "${id}" not found for vendor "${vendorId}"`,
-      );
+      throw new NotFoundException({ message: "We couldn't find a catalog entry for this product and vendor combination.", code: 'CATALOG_ENTRY_NOT_FOUND' });
     }
     await this.catalogRepo.softRemove(entry);
   }

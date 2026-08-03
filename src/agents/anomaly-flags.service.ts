@@ -15,8 +15,9 @@ export class AnomalyFlagsService {
     private readonly mapper: AnomalyFlagMapper,
   ) {}
 
-  async create(data: CreateAnomalyFlagDto): Promise<AnomalyFlagResponseDto> {
+  async create(tenantId: string, data: CreateAnomalyFlagDto): Promise<AnomalyFlagResponseDto> {
     const flag = this.flagRepo.create({
+      tenantId,
       skuId: data.skuId,
       description: data.description,
       relatedMovementIds: data.relatedMovementIds,
@@ -30,12 +31,14 @@ export class AnomalyFlagsService {
   }
 
   async findAll(
+    tenantId: string,
     status?: string,
     page: number = 1,
     limit: number = 20,
   ): Promise<{ data: AnomalyFlagResponseDto[]; total: number }> {
     const qb = this.flagRepo
       .createQueryBuilder('flag')
+      .where('flag.tenantId = :tenantId', { tenantId })
       .orderBy('flag.createdAt', 'DESC');
 
     if (status) {
@@ -49,10 +52,10 @@ export class AnomalyFlagsService {
     };
   }
 
-  async markReviewed(id: string, reviewedBy: string): Promise<AnomalyFlagResponseDto> {
-    const flag = await this.flagRepo.findOne({ where: { id } });
+  async markReviewed(tenantId: string, id: string, reviewedBy: string): Promise<AnomalyFlagResponseDto> {
+    const flag = await this.flagRepo.findOne({ where: { id, tenantId } });
     if (!flag) {
-      throw new NotFoundException(`Anomaly flag with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The selected anomaly flag does not exist.', code: 'ANOMALY_FLAG_NOT_FOUND' });
     }
 
     flag.status = 'reviewed';
@@ -62,10 +65,10 @@ export class AnomalyFlagsService {
     return this.mapper.toResponse(saved);
   }
 
-  async escalate(id: string): Promise<AnomalyFlagResponseDto> {
-    const flag = await this.flagRepo.findOne({ where: { id } });
+  async escalate(tenantId: string, id: string): Promise<AnomalyFlagResponseDto> {
+    const flag = await this.flagRepo.findOne({ where: { id, tenantId } });
     if (!flag) {
-      throw new NotFoundException(`Anomaly flag with ID "${id}" not found`);
+      throw new NotFoundException({ message: 'The selected anomaly flag does not exist.', code: 'ANOMALY_FLAG_NOT_FOUND' });
     }
 
     flag.status = 'escalated';

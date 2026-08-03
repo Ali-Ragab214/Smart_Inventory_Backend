@@ -14,6 +14,7 @@ import { WarehousesModule } from './warehouses/warehouses.module';
 import { StockLevelsModule } from './inventory/stock-levels/stock-levels.module';
 import { KnowledgeChunksModule } from './knowledge-chunks/knowledge-chunks.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { RagModule } from './rag/rag.module';
 
 @Module({
   imports: [
@@ -26,7 +27,7 @@ import { UploadsModule } from './uploads/uploads.module';
       useFactory: (config: ConfigService) => ({
         type: "postgres",
         host: config.get<string>("DB_HOST", "localhost"),
-        port: config.get<number>("DB_PORT", 5432),
+        port: parseInt(config.get<string>("DB_PORT", "5432"), 10),
         username: config.get<string>("DB_USERNAME", "root"),
         password: config.get<string>("DB_PASSWORD", "your_password"),
         database: config.get<string>("DB_NAME", "smart_inventory"),
@@ -47,7 +48,7 @@ import { UploadsModule } from './uploads/uploads.module';
       useFactory: (config: ConfigService) => ({
         connection: {
           host: config.get<string>('REDIS_HOST', 'localhost'),
-          port: config.get<number>('REDIS_PORT', 6379),
+          port: parseInt(config.get<string>('REDIS_PORT', '6379'), 10),
         },
       }),
     }),
@@ -57,6 +58,7 @@ import { UploadsModule } from './uploads/uploads.module';
     StockLevelsModule,
     KnowledgeChunksModule,
     UploadsModule,
+    RagModule,
   ],
 })
 export class AppModule {}

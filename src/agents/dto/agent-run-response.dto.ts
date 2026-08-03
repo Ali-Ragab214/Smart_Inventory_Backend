@@ -2,7 +2,7 @@ export class AgentRunResponseDto {
   id!: string;
   agentType!: string;
   status!: string;
-  relatedSkuId!: string | null;
+  skuIds!: string[];
   relatedVendorId!: string | null;
   relatedPoId!: string | null;
   createdAt!: Date;

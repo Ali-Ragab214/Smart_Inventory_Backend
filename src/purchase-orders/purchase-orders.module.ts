@@ -6,9 +6,13 @@ import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PurchaseOrderMapper } from './mappers/purchase-order.mapper';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PurchaseOrder, PurchaseOrderLineItem, Warehouse])],
+  imports: [
+    TypeOrmModule.forFeature([PurchaseOrder, PurchaseOrderLineItem, Warehouse]),
+    InventoryModule,
+  ],
   controllers: [PurchaseOrdersController],
   providers: [PurchaseOrdersService, PurchaseOrderMapper],
   exports: [PurchaseOrdersService],
