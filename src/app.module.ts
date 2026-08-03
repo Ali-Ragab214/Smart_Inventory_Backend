@@ -13,6 +13,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { WarehousesModule } from './warehouses/warehouses.module';
 import { StockLevelsModule } from './inventory/stock-levels/stock-levels.module';
 import { KnowledgeChunksModule } from './knowledge-chunks/knowledge-chunks.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { RagModule } from './rag/rag.module';
 
 @Module({
@@ -56,6 +57,7 @@ import { RagModule } from './rag/rag.module';
     WarehousesModule,
     StockLevelsModule,
     KnowledgeChunksModule,
+    UploadsModule,
     RagModule,
   ],
 })
