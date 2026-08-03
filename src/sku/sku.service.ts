@@ -217,4 +217,43 @@ export class SkuService {
       errors,
     };
   }
+
+  async exportCsv(tenantId: string): Promise<string> {
+    const rows = await this.skuRepository
+      .createQueryBuilder('sku')
+      .leftJoin('sku.category', 'category')
+      .leftJoin('sku.preferredVendor', 'vendor')
+      .select([
+        'sku.sku AS "skuCode"',
+        'sku.name AS "name"',
+        'category.name AS "categoryName"',
+        'sku.cost AS "costPrice"',
+        'sku.price AS "sellingPrice"',
+        'vendor.name AS "vendorName"',
+      ])
+      .where('sku.tenantId = :tenantId', { tenantId })
+      .orderBy('sku.name', 'ASC')
+      .getRawMany();
+
+    const escape = (value: unknown): string => {
+      const text = value === null || value === undefined ? '' : String(value);
+      return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+
+    const header = ['skuCode', 'name', 'categoryName', 'costPrice', 'sellingPrice', 'vendorName'];
+    const lines = rows.map((row) =>
+      [
+        row.skuCode,
+        row.name,
+        row.categoryName,
+        row.costPrice,
+        row.sellingPrice,
+        row.vendorName,
+      ]
+        .map(escape)
+        .join(','),
+    );
+
+    return [header.map(escape).join(','), ...lines].join('\r\n');
+  }
 }
