@@ -13,6 +13,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  StreamableFile,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
@@ -83,6 +84,21 @@ export class SkuController {
 
     const data = await this.skuService.importCsv(user.tenantId!, file.buffer);
     return successResponse(data);
+  }
+
+  @Get('export')
+  @ApiOperation({ summary: 'Export all SKUs as a CSV file' })
+  @ApiOkResponse({
+    description: 'CSV file of all SKUs for the current tenant',
+    content: { 'text/csv': {} },
+  })
+  async exportCsv(@CurrentUser() user: UserResponseDto): Promise<StreamableFile> {
+    const csv = await this.skuService.exportCsv(user.tenantId!);
+    const filename = `skus-${new Date().toISOString().slice(0, 10)}.csv`;
+    return new StreamableFile(Buffer.from(csv, 'utf-8'), {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="${filename}"`,
+    });
   }
 
   @Get()
