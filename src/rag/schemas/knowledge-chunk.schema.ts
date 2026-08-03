@@ -1,6 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  Min,
+} from 'class-validator';
 import { KnowledgeSourceType } from '../entities/knowledge-chunk.entity';
 
 export class IngestKnowledgeChunkDto {
@@ -26,4 +35,29 @@ export class IngestKnowledgeChunkDto {
   @IsUUID()
   @IsOptional()
   skuId?: string;
+}
+
+export class SearchKnowledgeChunkDto {
+  @ApiProperty({ example: 'what price did we agree with VendorCo?' })
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  query!: string;
+
+  @ApiPropertyOptional({ description: 'Filter results to a specific vendor' })
+  @IsUUID()
+  @IsOptional()
+  vendorId?: string;
+
+  @ApiPropertyOptional({ enum: KnowledgeSourceType })
+  @IsEnum(KnowledgeSourceType)
+  @IsOptional()
+  sourceType?: KnowledgeSourceType;
+
+  @ApiPropertyOptional({ example: 5, description: 'Max results to return (1-20)' })
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  @IsOptional()
+  topK?: number;
 }
