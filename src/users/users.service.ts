@@ -115,7 +115,7 @@ export class UsersService {
   }
 
   async findMe(id: string): Promise<UserResponseDto> {
-    return this.findById(id);
+    return this.findById(null, id);
   }
 
   /**

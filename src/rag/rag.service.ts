@@ -10,6 +10,21 @@ export interface IngestResult {
   sourceType: string;
 }
 
+export interface SearchFilter {
+  vendorId?: string;
+  sourceType?: string;
+}
+
+export interface SearchResult {
+  id: string;
+  content: string;
+  sourceType: string;
+  vendorId: string;
+  score: number;
+}
+
+const MIN_SCORE_THRESHOLD = 0.3;
+
 @Injectable()
 export class RagService implements OnModuleInit {
   private readonly logger = new Logger(RagService.name);
@@ -70,5 +85,71 @@ export class RagService implements OnModuleInit {
       content: row.content,
       sourceType: row.sourceType,
     };
+  }
+
+  /**
+   * Semantic search over the knowledge base.
+   * Embeds the query, finds the most similar chunks via cosine distance
+   * (`<=>` operator), and returns them ranked with a similarity score.
+   * Results below MIN_SCORE_THRESHOLD are too weak to be useful and are dropped.
+   */
+  async search(
+    query: string,
+    filters: SearchFilter = {},
+    topK: number = 5,
+  ): Promise<SearchResult[]> {
+    const trimmed = typeof query === 'string' ? query.trim() : '';
+    if (!trimmed) {
+      throw new BadRequestException('Query must not be empty.');
+    }
+
+    if (!Number.isInteger(topK) || topK < 1 || topK > 20) {
+      throw new BadRequestException('topK must be an integer between 1 and 20.');
+    }
+
+    const embedding = await this.embeddingService.embed(trimmed);
+    const vectorLiteral = `[${embedding.join(',')}]`;
+
+    // $1 is always the query vector. Subsequent params map to filters/LIMIT.
+    const params: unknown[] = [vectorLiteral];
+    const conditions: string[] = ['1=1'];
+
+    if (filters.vendorId) {
+      params.push(filters.vendorId);
+      conditions.push(`"vendorId" = $${params.length}`);
+    }
+    if (filters.sourceType) {
+      params.push(filters.sourceType);
+      conditions.push(`"sourceType" = $${params.length}`);
+    }
+
+    params.push(topK);
+
+    const sql = `
+      SELECT id, content, "sourceType", "vendorId",
+             1 - (embedding <=> $1::vector) AS score
+      FROM knowledge_chunks
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY embedding <=> $1::vector ASC
+      LIMIT $${params.length}
+    `;
+
+    const rows = (await this.dataSource.query(sql, params)) as Array<{
+      id: string;
+      content: string;
+      sourceType: string;
+      vendorId: string;
+      score: number;
+    }>;
+
+    return rows
+      .map((row) => ({
+        id: row.id,
+        content: row.content,
+        sourceType: row.sourceType,
+        vendorId: row.vendorId,
+        score: typeof row.score === 'number' ? row.score : parseFloat(row.score),
+      }))
+      .filter((row) => row.score >= MIN_SCORE_THRESHOLD);
   }
 }

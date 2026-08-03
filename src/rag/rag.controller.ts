@@ -1,8 +1,17 @@
 import { Body, Controller, Post } from '@nestjs/common';
-import { ApiBadRequestResponse, ApiCreatedResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBadRequestResponse,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { successResponse } from '../utils/response.util';
 import { RagService } from './rag.service';
-import { IngestKnowledgeChunkDto } from './schemas/knowledge-chunk.schema';
+import {
+  IngestKnowledgeChunkDto,
+  SearchKnowledgeChunkDto,
+} from './schemas/knowledge-chunk.schema';
 
 @ApiTags('rag')
 @Controller('rag')
@@ -18,6 +27,22 @@ export class RagController {
       vendorId: dto.vendorId,
       skuId: dto.skuId,
     });
+    return successResponse(data);
+  }
+
+  @Post('search')
+  @ApiOperation({ summary: 'Semantic search across the knowledge base' })
+  @ApiOkResponse({ description: 'Ranked semantically-similar chunks' })
+  @ApiBadRequestResponse({ description: 'Empty query, invalid topK, or bad filter' })
+  async search(@Body() dto: SearchKnowledgeChunkDto) {
+    const data = await this.ragService.search(
+      dto.query,
+      {
+        vendorId: dto.vendorId,
+        sourceType: dto.sourceType,
+      },
+      dto.topK ?? 5,
+    );
     return successResponse(data);
   }
 }
