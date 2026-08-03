@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApprovalQueueService } from './approval-queue.service';
 import { ApprovalRequest } from './entities/approval-request.entity';
 import { ApprovalRequestMapper } from './mappers/approval-request.mapper';
@@ -9,6 +10,8 @@ import { ApprovalQueryDto } from './dto/approval-query.dto';
 describe('ApprovalQueueService', () => {
   let service: ApprovalQueueService;
   let mockApprovalRepo: any;
+
+  const TENANT_ID = 'tenant-uuid';
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -29,6 +32,7 @@ describe('ApprovalQueueService', () => {
         ApprovalRequestMapper,
         { provide: getRepositoryToken(ApprovalRequest), useValue: mockApprovalRepo },
         { provide: AgentRunService, useValue: mockAgentRunService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 
@@ -57,7 +61,7 @@ describe('ApprovalQueueService', () => {
       mockApprovalRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
       const query: ApprovalQueryDto = { page: 1, limit: 10 };
-      const result = await service.findPending(query);
+      const result = await service.findPending(TENANT_ID, query);
 
       expect(result.data).toHaveLength(1);
       expect(result.total).toBe(1);
@@ -67,6 +71,7 @@ describe('ApprovalQueueService', () => {
       const mockQueryBuilder = {
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         take: jest.fn().mockReturnThis(),
         getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
@@ -74,7 +79,7 @@ describe('ApprovalQueueService', () => {
       mockApprovalRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
       const query: ApprovalQueryDto = { page: 1, limit: 10 };
-      const result = await service.findPending(query);
+      const result = await service.findPending(TENANT_ID, query);
 
       expect(result.data).toHaveLength(0);
       expect(result.total).toBe(0);

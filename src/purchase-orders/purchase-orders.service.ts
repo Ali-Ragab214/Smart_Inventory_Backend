@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PurchaseOrder } from './entities/purchase-order.entity';
@@ -10,6 +11,8 @@ import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { paginate } from '../utils/pagination.util';
 import { StockMovementService } from '../inventory/stock-movements/stock-movement.service';
 import { MovementReason } from '../inventory/stock-movements/enums/movement-reason.enum';
+import { NotificationEvents } from '../notifications/events/notification-events';
+import { PoReceivedEvent } from '../notifications/events/po-received.event';
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   draft: ['pending_approval', 'rejected'],
@@ -27,6 +30,7 @@ export class PurchaseOrdersService {
     private readonly poRepository: Repository<PurchaseOrder>,
     private readonly mapper: PurchaseOrderMapper,
     private readonly stockMovementService: StockMovementService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(tenantId: string, dto: CreatePurchaseOrderDto): Promise<PurchaseOrderResponseDto> {
@@ -113,8 +117,24 @@ export class PurchaseOrdersService {
       }
     }
 
+    const previousStatus = po.status;
     po.status = targetStatus;
     const saved = await this.poRepository.save(po);
+
+    if (targetStatus === 'received' && previousStatus !== 'received') {
+      this.eventEmitter.emit(
+        NotificationEvents.PO_RECEIVED,
+        new PoReceivedEvent(tenantId, {
+          purchaseOrderId: po.id,
+          warehouseId: po.warehouseId,
+          vendorId: po.vendorId,
+          status: 'received',
+          lineItemCount: po.lineItems.length,
+          receivedAt: new Date().toISOString(),
+        }),
+      );
+    }
+
     const loaded = await this.poRepository.findOne({
       where: { id: saved.id },
       relations: { lineItems: true },

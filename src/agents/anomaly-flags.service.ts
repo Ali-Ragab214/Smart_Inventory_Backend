@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AnomalyFlag } from './entities/anomaly-flag.entity';
@@ -6,6 +7,8 @@ import { AnomalyFlagMapper } from './mappers/anomaly-flag.mapper';
 import { CreateAnomalyFlagDto } from './dto/create-anomaly-flag.dto';
 import { AnomalyFlagResponseDto } from './dto/anomaly-flag-response.dto';
 import { paginate } from '../utils/pagination.util';
+import { NotificationEvents } from '../notifications/events/notification-events';
+import { AnomalyFlaggedEvent } from '../notifications/events/anomaly-flagged.event';
 
 @Injectable()
 export class AnomalyFlagsService {
@@ -13,6 +16,7 @@ export class AnomalyFlagsService {
     @InjectRepository(AnomalyFlag)
     private readonly flagRepo: Repository<AnomalyFlag>,
     private readonly mapper: AnomalyFlagMapper,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(tenantId: string, data: CreateAnomalyFlagDto): Promise<AnomalyFlagResponseDto> {
@@ -27,6 +31,18 @@ export class AnomalyFlagsService {
     });
 
     const saved = await this.flagRepo.save(flag);
+
+    this.eventEmitter.emit(
+      NotificationEvents.ANOMALY_FLAGGED,
+      new AnomalyFlaggedEvent(tenantId, {
+        anomalyId: saved.id,
+        skuId: saved.skuId ?? null,
+        description: saved.description,
+        agentRunId: saved.agentRunId ?? null,
+        flaggedAt: saved.createdAt.toISOString(),
+      }),
+    );
+
     return this.mapper.toResponse(saved);
   }
 

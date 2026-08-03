@@ -11,6 +11,8 @@ describe('SkuService', () => {
   let service: SkuService;
   let repository: Repository<Sku>;
 
+  const TENANT_ID = 'tenant-uuid';
+
   const mockQueryRunner = {
     connect: jest.fn(),
     startTransaction: jest.fn(),
@@ -70,7 +72,7 @@ describe('SkuService', () => {
 
   describe('importCsv', () => {
     it('should throw BadRequestException if buffer is empty', async () => {
-      await expect(service.importCsv(Buffer.from(''))).rejects.toThrow(
+      await expect(service.importCsv(TENANT_ID, Buffer.from(''))).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -78,14 +80,14 @@ describe('SkuService', () => {
     it('should throw BadRequestException if CSV is malformed', async () => {
       const malformedCsv = 'skuCode,name\n"unclosed quote,value';
       await expect(
-        service.importCsv(Buffer.from(malformedCsv)),
+        service.importCsv(TENANT_ID, Buffer.from(malformedCsv)),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('should throw BadRequestException if CSV contains no data rows', async () => {
       const emptyCsv =
         'skuCode,name,description,category,unit,costPrice,sellingPrice\n';
-      await expect(service.importCsv(Buffer.from(emptyCsv))).rejects.toThrow(
+      await expect(service.importCsv(TENANT_ID, Buffer.from(emptyCsv))).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -98,7 +100,7 @@ SKU002,Mouse,Wireless Mouse,Accessories,PCS,20,35`;
       mockRepository.find.mockResolvedValue([]);
       mockQueryRunner.manager.save.mockResolvedValue([]);
 
-      const result = await service.importCsv(Buffer.from(validCsv));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(validCsv));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(2);
@@ -113,7 +115,7 @@ SKU002,Mouse,Wireless Mouse,Accessories,PCS,20,35`;
 SKU001,,1000,1300
 ,Mouse,20,35`;
 
-      const result = await service.importCsv(Buffer.from(csvData));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(csvData));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(0);
@@ -130,7 +132,7 @@ SKU001,,1000,1300
 SKU001,Laptop,invalid_cost,1300
 SKU002,Mouse,20,-35`;
 
-      const result = await service.importCsv(Buffer.from(csvData));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(csvData));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(0);
@@ -149,7 +151,7 @@ SKU001,Laptop Duplicate,1000,1300`;
       mockRepository.find.mockResolvedValue([]);
       mockQueryRunner.manager.save.mockResolvedValue([]);
 
-      const result = await service.importCsv(Buffer.from(csvData));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(csvData));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(1);
@@ -167,7 +169,7 @@ SKU002,Mouse,20,35`;
       mockRepository.find.mockResolvedValue([{ sku: 'SKU001' }]);
       mockQueryRunner.manager.save.mockResolvedValue([]);
 
-      const result = await service.importCsv(Buffer.from(csvData));
+      const result = await service.importCsv(TENANT_ID, Buffer.from(csvData));
 
       expect(result.totalRows).toBe(2);
       expect(result.successful).toBe(1);
@@ -186,7 +188,7 @@ SKU002,Mouse,20,35`;
       mockRepository.find.mockResolvedValue([]);
       mockQueryRunner.manager.save.mockResolvedValue([]);
 
-      const result = await service.importCsv(bomBuffer);
+      const result = await service.importCsv(TENANT_ID, bomBuffer);
 
       expect(result.totalRows).toBe(1);
       expect(result.successful).toBe(1);

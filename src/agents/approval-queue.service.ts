@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApprovalRequest } from './entities/approval-request.entity';
@@ -9,6 +10,8 @@ import { paginate } from '../utils/pagination.util';
 import { AgentRunService } from './agent-run.service';
 import { ApprovalRequestResponseDto } from './dto/approval-request-response.dto';
 import { ApproveApprovalRequestDto, RejectApprovalRequestDto } from './dto/approval-action.dto';
+import { NotificationEvents } from '../notifications/events/notification-events';
+import { ApprovalRequestedEvent } from '../notifications/events/approval-requested.event';
 
 @Injectable()
 export class ApprovalQueueService {
@@ -17,6 +20,7 @@ export class ApprovalQueueService {
     private readonly approvalRepo: Repository<ApprovalRequest>,
     private readonly mapper: ApprovalRequestMapper,
     private readonly agentRunService: AgentRunService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(tenantId: string, data: CreateApprovalRequestDto): Promise<ApprovalRequestResponseDto> {
@@ -33,6 +37,19 @@ export class ApprovalQueueService {
     });
 
     const saved = await this.approvalRepo.save(approval);
+
+    this.eventEmitter.emit(
+      NotificationEvents.APPROVAL_REQUESTED,
+      new ApprovalRequestedEvent(tenantId, {
+        approvalId: saved.id,
+        agentRunId: saved.agentRunId,
+        agentType: saved.agentType,
+        stepNumber: saved.stepNumber,
+        reasoning: saved.reasoning,
+        requestedAt: saved.createdAt.toISOString(),
+      }),
+    );
+
     return this.mapper.toResponse(saved);
   }
 

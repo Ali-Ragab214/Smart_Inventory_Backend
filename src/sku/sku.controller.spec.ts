@@ -39,8 +39,10 @@ describe('SkuController', () => {
   });
 
   describe('importCsv', () => {
+    const mockUser = { id: 'u1', tenantId: 'tenant-1' } as any;
+
     it('should throw BadRequestException if file is missing', async () => {
-      await expect(controller.importCsv(undefined)).rejects.toThrow(
+      await expect(controller.importCsv(undefined, mockUser)).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -51,7 +53,7 @@ describe('SkuController', () => {
         buffer: Buffer.from('data'),
       } as Express.Multer.File;
 
-      await expect(controller.importCsv(mockFile)).rejects.toThrow(
+      await expect(controller.importCsv(mockFile, mockUser)).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -71,9 +73,10 @@ describe('SkuController', () => {
 
       mockSkuService.importCsv.mockResolvedValue(mockResponse);
 
-      const result = await controller.importCsv(mockFile);
+      const mockUser = { id: 'u1', tenantId: 'tenant-1' } as any;
+      const result = await controller.importCsv(mockFile, mockUser);
 
-      expect(mockSkuService.importCsv).toHaveBeenCalledWith(mockFile.buffer);
+      expect(mockSkuService.importCsv).toHaveBeenCalledWith('tenant-1', mockFile.buffer);
       expect(result).toEqual({
         success: true,
         data: mockResponse,

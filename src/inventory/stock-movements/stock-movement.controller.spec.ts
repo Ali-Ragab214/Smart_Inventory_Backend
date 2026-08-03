@@ -35,6 +35,8 @@ describe('StockMovementController', () => {
     expect(controller).toBeDefined();
   });
 
+  const mockUser = { id: 'u1', tenantId: 'tenant-1', warehouseId: 'wh-1' } as any;
+
   describe('getHistoryForSku', () => {
     it('should return paginated response wrapped from service', async () => {
       const mockData = [
@@ -55,9 +57,10 @@ describe('StockMovementController', () => {
       });
 
       const queryDto: StockMovementQueryDto = { reason: MovementReason.MANUAL_ADJUSTMENT, page: 1, limit: 10 };
-      const result = await controller.getHistoryForSku('sku-uuid', queryDto);
+      const result = await controller.getHistoryForSku('sku-uuid', queryDto, mockUser);
 
       expect(mockStockMovementService.getHistoryForSku).toHaveBeenCalledWith(
+        'tenant-1',
         'sku-uuid',
         queryDto,
       );
@@ -81,9 +84,9 @@ describe('StockMovementController', () => {
 
       mockStockMovementService.reconcileBalance.mockResolvedValue(mockResult);
 
-      const result = await controller.reconcileBalance('sku-uuid', 'wh-uuid' as any);
+      const result = await controller.reconcileBalance('sku-uuid', 'wh-uuid' as any, mockUser);
 
-      expect(mockStockMovementService.reconcileBalance).toHaveBeenCalledWith('sku-uuid', 'wh-uuid');
+      expect(mockStockMovementService.reconcileBalance).toHaveBeenCalledWith('tenant-1', 'sku-uuid', 'wh-uuid');
       expect(result).toEqual({ success: true, data: mockResult, meta: null });
     });
   });
@@ -97,9 +100,9 @@ describe('StockMovementController', () => {
 
       mockStockMovementService.getConsumptionSeries.mockResolvedValue(mockResult);
 
-      const result = await controller.getConsumptionSeries('sku-uuid', 'wh-uuid' as any, 30 as any);
+      const result = await controller.getConsumptionSeries('sku-uuid', 'wh-uuid' as any, 30 as any, mockUser);
 
-      expect(mockStockMovementService.getConsumptionSeries).toHaveBeenCalledWith('sku-uuid', 'wh-uuid', 30);
+      expect(mockStockMovementService.getConsumptionSeries).toHaveBeenCalledWith('tenant-1', 'sku-uuid', 'wh-uuid', 30);
       expect(result).toEqual({ success: true, data: mockResult, meta: null });
     });
   });

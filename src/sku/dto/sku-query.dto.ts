@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
 import { PaginationQueryDto } from '../../utils/query.dto';
 
 export class SkuQueryDto extends PaginationQueryDto {
@@ -9,4 +9,8 @@ export class SkuQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(['ASC', 'DESC'])
   sortOrder?: 'ASC' | 'DESC' = 'ASC';
+
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
 }

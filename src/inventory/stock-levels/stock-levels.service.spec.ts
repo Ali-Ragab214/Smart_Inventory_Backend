@@ -48,6 +48,8 @@ describe('StockLevelsService', () => {
   let service: StockLevelsService;
   let mockRepo: any;
 
+  const TENANT_ID = 'tenant-uuid';
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -89,7 +91,7 @@ describe('StockLevelsService', () => {
       const qb = makeQueryBuilder([level], 1);
       mockRepo.createQueryBuilder.mockReturnValue(qb);
 
-      const result = await service.findByWarehouse('wh-uuid', { page: 1, limit: 20 });
+      const result = await service.findByWarehouse(TENANT_ID, 'wh-uuid', { page: 1, limit: 20 });
 
       expect(result.total).toBe(1);
       expect(result.data).toHaveLength(1);
@@ -102,7 +104,7 @@ describe('StockLevelsService', () => {
       const qb = makeQueryBuilder([], 0);
       mockRepo.createQueryBuilder.mockReturnValue(qb);
 
-      await service.findByWarehouse('wh-uuid', { page: 1, limit: 20, skuId: 'sku-uuid' });
+      await service.findByWarehouse(TENANT_ID, 'wh-uuid', { page: 1, limit: 20, skuId: 'sku-uuid' });
 
       expect(qb.andWhere).toHaveBeenCalledWith('sl.skuId = :skuId', {
         skuId: 'sku-uuid',
@@ -113,7 +115,7 @@ describe('StockLevelsService', () => {
       const qb = makeQueryBuilder([], 0);
       mockRepo.createQueryBuilder.mockReturnValue(qb);
 
-      await service.findByWarehouse('wh-uuid', { page: 1, limit: 20 });
+      await service.findByWarehouse(TENANT_ID, 'wh-uuid', { page: 1, limit: 20 });
 
       expect(qb.where).toHaveBeenCalledWith('sl.warehouseId = :warehouseId', {
         warehouseId: 'wh-uuid',
@@ -127,7 +129,7 @@ describe('StockLevelsService', () => {
     it('should return a single mapped response DTO', async () => {
       mockRepo.findOne.mockResolvedValue(makeStockLevel());
 
-      const result = await service.findOne('sl-uuid');
+      const result = await service.findOne(TENANT_ID, 'sl-uuid');
 
       expect(result.id).toBe('sl-uuid');
       expect(result.skuName).toBe('Widget A');
@@ -138,7 +140,7 @@ describe('StockLevelsService', () => {
     it('should throw NotFoundException when record does not exist', async () => {
       mockRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.findOne('nonexistent')).rejects.toThrow(
+      await expect(service.findOne(TENANT_ID, 'nonexistent')).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -154,7 +156,7 @@ describe('StockLevelsService', () => {
         Promise.resolve({ ...entity }),
       );
 
-      const result = await service.update('sl-uuid', {
+      const result = await service.update(TENANT_ID, 'sl-uuid', {
         reorderThreshold: 30,
         safetyStock: 15,
       });
@@ -171,7 +173,7 @@ describe('StockLevelsService', () => {
       mockRepo.findOne.mockResolvedValue(level);
       mockRepo.save.mockResolvedValue({ ...level, reorderThreshold: 40 });
 
-      const result = await service.update('sl-uuid', { reorderThreshold: 40 });
+      const result = await service.update(TENANT_ID, 'sl-uuid', { reorderThreshold: 40 });
 
       expect(result.reorderThreshold).toBe(40);
     });
@@ -180,7 +182,7 @@ describe('StockLevelsService', () => {
       mockRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.update('nonexistent', { reorderThreshold: 10 }),
+        service.update(TENANT_ID, 'nonexistent', { reorderThreshold: 10 }),
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -193,9 +195,12 @@ describe('StockLevelsService', () => {
       const qb = makeQueryBuilder([lowLevel], 1);
       mockRepo.createQueryBuilder.mockReturnValue(qb);
 
-      const result = await service.findLowStock();
+      const result = await service.findLowStock(TENANT_ID);
 
-      expect(qb.where).toHaveBeenCalledWith(
+      expect(qb.where).toHaveBeenCalledWith('sl.tenantId = :tenantId', {
+        tenantId: TENANT_ID,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
         'sl.quantity <= sl.reorderThreshold',
       );
       expect(result).toHaveLength(1);
@@ -206,7 +211,7 @@ describe('StockLevelsService', () => {
       const qb = makeQueryBuilder([], 0);
       mockRepo.createQueryBuilder.mockReturnValue(qb);
 
-      const result = await service.findLowStock();
+      const result = await service.findLowStock(TENANT_ID);
 
       expect(result).toHaveLength(0);
     });
