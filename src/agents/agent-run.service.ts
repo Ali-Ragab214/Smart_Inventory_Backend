@@ -76,8 +76,8 @@ export class AgentRunService {
     return successResponse(this.mapper.toRunResponse(saved));
   }
 
-  async enqueue(runId: string, agentType: AgentType): Promise<void> {
-    await this.agentQueue.add('run-agent-step', { runId, agentType });
+  async enqueue(tenantId: string, runId: string, agentType: AgentType): Promise<void> {
+    await this.agentQueue.add('run-agent-step', { tenantId, runId, agentType });
   }
 
   async load(tenantId: string, runId: string) {

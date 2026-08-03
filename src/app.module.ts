@@ -15,6 +15,8 @@ import { WarehousesModule } from './warehouses/warehouses.module';
 import { StockLevelsModule } from './inventory/stock-levels/stock-levels.module';
 import { KnowledgeChunksModule } from './knowledge-chunks/knowledge-chunks.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { UploadsModule } from './uploads/uploads.module';
+import { RagModule } from './rag/rag.module';
 
 @Module({
   imports: [
@@ -60,6 +62,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     StockLevelsModule,
     KnowledgeChunksModule,
     NotificationsModule,
+    UploadsModule,
+    RagModule,
   ],
 })
 export class AppModule {}

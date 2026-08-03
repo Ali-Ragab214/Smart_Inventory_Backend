@@ -17,6 +17,18 @@ export class User extends AbstractEntity {
   @Column({ type: 'varchar', length: 255 })
   name!: string;
 
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  phone!: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  avatarUrl!: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  location!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  bio!: string | null;
+
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 255 })
   email!: string;

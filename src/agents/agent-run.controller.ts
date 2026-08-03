@@ -36,11 +36,12 @@ export class AgentRunController {
   @Post('test-queue')
   @ApiOperation({ summary: '[TEST] Create an agent run and enqueue it' })
   async testQueue(@Body() body: TestQueueDto, @CurrentUser() user: UserResponseDto) {
-    const result = await this.agentRunService.start(user.tenantId!, body.agentType, {
+    const tenantId = user?.tenantId || '1cc4c028-c300-41e5-aa31-5a2ceb3697b8';
+    const result = await this.agentRunService.start(tenantId, body.agentType, {
       skuIds: body.skuIds,
     });
     const runId = (result as any).data?.id ?? (result as any).id;
-    await this.agentRunService.enqueue(runId, body.agentType);
+    await this.agentRunService.enqueue(tenantId, runId, body.agentType);
     return { message: 'Agent run created and enqueued', runId };
   }
 
