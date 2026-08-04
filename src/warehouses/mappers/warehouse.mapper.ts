@@ -11,6 +11,7 @@ export class WarehouseMapper {
     warehouse.name = dto.name;
     warehouse.location = dto.location ?? null;
     warehouse.status = dto.status ?? undefined as any;
+    warehouse.isMain = dto.isMain ?? false;
     if (dto.tenantId) {
       warehouse.tenantId = dto.tenantId;
     }
