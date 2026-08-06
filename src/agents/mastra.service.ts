@@ -10,6 +10,8 @@ import { StockMovement } from '../inventory/stock-movements/entities/stock-movem
 import { StockLevel } from '../inventory/stock-levels/entities/stock-level.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { AnomalyFlag } from './entities/anomaly-flag.entity';
+import { ApprovalRequest } from './entities/approval-request.entity';
+import { RagService } from '../rag/rag.service';
 
 @Injectable()
 export class MastraService {
@@ -19,10 +21,12 @@ export class MastraService {
   public anomalyAgent: Agent | null = null;
   public forecastingAgent: Agent | null = null;
   public reorderAgent: Agent | null = null;
+  public negotiationAgent: Agent | null = null;
 
   constructor(
     private readonly config: ConfigService,
     private readonly dataSource: DataSource,
+    private readonly ragService: RagService,
   ) {
     this.initializeMastra();
   }
@@ -103,12 +107,51 @@ export class MastraService {
       }
     });
 
+    const searchKnowledgeBaseTool = createTool({
+      id: 'searchKnowledgeBase',
+      description: 'Search the vendor knowledge base (contracts, pricing catalogs, transcripts) for context before negotiating.',
+      inputSchema: z.object({
+        query: z.string(),
+        vendorId: z.string().uuid().optional(),
+      }),
+      execute: async ({ context }) => {
+        const filters = context.vendorId ? { vendorId: context.vendorId } : {};
+        const results = await this.ragService.search(context.query, filters, 5);
+        return results;
+      }
+    });
+
+    const draftNegotiationProposalTool = createTool({
+      id: 'draftNegotiationProposal',
+      description: 'Draft a negotiation email to a vendor and submit it for human approval.',
+      inputSchema: z.object({
+        vendorId: z.string().uuid(),
+        agentRunId: z.string().uuid(),
+        tenantId: z.string().uuid(),
+        emailContent: z.string(),
+        reasoning: z.string(),
+      }),
+      execute: async ({ context }) => {
+        const repo = this.dataSource.getRepository(ApprovalRequest);
+        const approval = repo.create({
+          tenantId: context.tenantId,
+          agentRunId: context.agentRunId,
+          agentType: 'negotiation',
+          stepNumber: 1,
+          payload: { emailContent: context.emailContent, vendorId: context.vendorId },
+          reasoning: context.reasoning,
+          status: 'pending',
+        });
+        return await repo.save(approval);
+      }
+    });
+
     // 2. Define Agents
     this.anomalyAgent = new Agent({
       name: 'Anomaly Agent',
       id: 'anomaly-agent',
       instructions: 'You are an inventory fraud and anomaly detection assistant. Scan recent movements for suspicious activity (like negative adjustments without sales). If you find any, use the createAnomalyFlag tool.',
-      model: anthropic('claude-3-5-sonnet-20241022'),
+      model: anthropic('claude-sonnet-4-6'),
       tools: {
         fetchRecentMovements: fetchRecentMovementsTool,
         createAnomalyFlag: createAnomalyFlagTool,
@@ -119,7 +162,7 @@ export class MastraService {
       name: 'Forecasting Agent',
       id: 'forecasting-agent',
       instructions: 'You are a demand forecasting assistant. Analyze historical stock movements to project future demand. Provide clear reasoning.',
-      model: anthropic('claude-3-5-sonnet-20241022'),
+      model: anthropic('claude-sonnet-4-6'),
       tools: {
         fetchStockHistory: fetchStockHistoryTool,
       }
@@ -129,9 +172,20 @@ export class MastraService {
       name: 'Reorder Agent',
       id: 'reorder-agent',
       instructions: 'You are a restocking assistant. Check stock levels for the provided SKUs. If they are low, prepare to draft a Purchase Order.',
-      model: anthropic('claude-3-5-sonnet-20241022'),
+      model: anthropic('claude-sonnet-4-6'),
       tools: {
         checkStockLevels: checkStockLevelsTool,
+      }
+    });
+
+    this.negotiationAgent = new Agent({
+      name: 'Vendor Negotiation Agent',
+      id: 'negotiation-agent',
+      instructions: 'You are a vendor negotiation assistant. First, use searchKnowledgeBase to find relevant past terms, pricing, or contract clauses for the given vendor. Then, formulate a strategy and use draftNegotiationProposal to prepare a professional email asking for better pricing, bulk discounts, or improved payment terms. Do not hallucinate terms; rely only on the retrieved knowledge base data.',
+      model: anthropic('claude-sonnet-4-6'),
+      tools: {
+        searchKnowledgeBase: searchKnowledgeBaseTool,
+        draftNegotiationProposal: draftNegotiationProposalTool,
       }
     });
 
@@ -141,6 +195,7 @@ export class MastraService {
         anomaly: this.anomalyAgent,
         forecasting: this.forecastingAgent,
         reorder: this.reorderAgent,
+        negotiation: this.negotiationAgent,
       },
     });
     

@@ -81,7 +81,10 @@ export class AgentRunService {
   }
 
   async load(tenantId: string, runId: string) {
-    const run = await this.runRepository.findOne({ where: { id: runId, tenantId } });
+    const run = await this.runRepository.findOne({
+      where: { id: runId, tenantId },
+      relations: ['skus'],
+    });
     if (!run) {
       throw new NotFoundException({ message: 'The requested agent run could not be found.', code: 'AGENT_RUN_NOT_FOUND' });
     }

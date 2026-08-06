@@ -17,13 +17,16 @@ import { LLMService } from './llm.service';
 import { AgentRunService } from './agent-run.service';
 import { AgentRunController } from './agent-run.controller';
 import { AgentsProcessor } from './agents.processor';
+import { GatewayLlmService } from './gateway-llm.service';
 import { AgentRunMapper } from './mappers/agent-run.mapper';
 import { ApprovalRequestMapper } from './mappers/approval-request.mapper';
 import { AnomalyFlagMapper } from './mappers/anomaly-flag.mapper';
 import { InventoryService } from './inventory.service';
 import { ToolExecutorService } from './tool-executor.service';
 import { MastraService } from './mastra.service';
-
+import { AgentSchedulerService } from './agent-scheduler.service';
+import { RagModule } from '../rag/rag.module';
+import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([AgentRun, AgentStep, ApprovalRequest, AnomalyFlag, User]),
@@ -31,6 +34,8 @@ import { MastraService } from './mastra.service';
     SkuModule,
     InventoryModule,
     VendorsModule,
+    RagModule,
+    PurchaseOrdersModule,
   ],
   controllers: [ApprovalQueueController, AgentRunController, AnomalyFlagsController],
   providers: [
@@ -39,12 +44,14 @@ import { MastraService } from './mastra.service';
     ApprovalQueueService,
     AgentRunService,
     AgentsProcessor,
+    GatewayLlmService,
     AgentRunMapper,
     ApprovalRequestMapper,
     AnomalyFlagMapper,
     InventoryService,
     ToolExecutorService,
     MastraService,
+    AgentSchedulerService,
   ],
   exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MastraService],
 })

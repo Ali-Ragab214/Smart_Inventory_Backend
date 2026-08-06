@@ -44,6 +44,32 @@ export class RagService implements OnModuleInit {
     await this.dataSource.query(
       'CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)',
     );
+
+    // The same sync also wipes the stored vectors for rows that survive. Any
+    // chunk whose embedding is NULL (lost on a previous restart) is re-embedded
+    // from its text content so the knowledge base stays self-healing.
+    try {
+      const rows = (await this.dataSource.query(
+        'SELECT id, content FROM knowledge_chunks WHERE embedding IS NULL',
+      )) as Array<{ id: string; content: string }>;
+      if (rows.length > 0) {
+        for (const row of rows) {
+          const vector = await this.embeddingService.embed(row.content);
+          const vectorLiteral = `[${vector.join(',')}]`;
+          await this.dataSource.query(
+            'UPDATE knowledge_chunks SET embedding = $1::vector WHERE id = $2',
+            [vectorLiteral, row.id],
+          );
+        }
+        this.logger.log(
+          `Re-embedded ${rows.length} knowledge chunk(s) that had lost their vectors.`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Re-embedding knowledge chunks failed: ${(err as Error).message}`,
+      );
+    }
     this.logger.log('pgvector embedding column ensured.');
   }
 
