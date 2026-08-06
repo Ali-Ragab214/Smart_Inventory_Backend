@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsOptional,
@@ -35,4 +36,9 @@ export class CreateWarehouseDto {
   @IsUUID()
   @IsOptional()
   tenantId?: string;
+
+  @ApiPropertyOptional({ example: false })
+  @IsBoolean()
+  @IsOptional()
+  isMain?: boolean;
 }

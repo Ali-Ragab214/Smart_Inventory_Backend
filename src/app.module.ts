@@ -17,6 +17,7 @@ import { KnowledgeChunksModule } from './knowledge-chunks/knowledge-chunks.modul
 import { NotificationsModule } from './notifications/notifications.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { RagModule } from './rag/rag.module';
+import { TenantsModule } from './tenants/tenants.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { RagModule } from './rag/rag.module';
     NotificationsModule,
     UploadsModule,
     RagModule,
+    TenantsModule,
   ],
 })
 export class AppModule {}
