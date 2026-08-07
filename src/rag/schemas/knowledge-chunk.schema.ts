@@ -61,3 +61,16 @@ export class SearchKnowledgeChunkDto {
   @IsOptional()
   topK?: number;
 }
+
+export class AskAssistantDto {
+  @ApiProperty({ example: 'What is our usual price for widgets from VendorCo?' })
+  @IsString()
+  @IsNotEmpty()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  query!: string;
+
+  @ApiPropertyOptional({ description: 'Filter context to a specific vendor' })
+  @IsUUID()
+  @IsOptional()
+  vendorId?: string;
+}
