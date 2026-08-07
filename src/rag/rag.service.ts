@@ -13,6 +13,7 @@ export interface IngestResult {
 export interface SearchFilter {
   vendorId?: string;
   sourceType?: string;
+  tenantId?: string;
 }
 
 export interface SearchResult {
@@ -43,6 +44,22 @@ export class RagService implements OnModuleInit {
     );
     await this.dataSource.query(
       'CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)',
+    );
+
+    // Phase 1 — add entity/tenant scoping columns for event-driven ingestion.
+    // These columns let us upsert (replace stale) chunks keyed by source entity
+    // and scope all retrieval per tenant.
+    await this.dataSource.query(`
+      ALTER TABLE knowledge_chunks
+        ADD COLUMN IF NOT EXISTS "tenantId" uuid,
+        ADD COLUMN IF NOT EXISTS "entityType" varchar(50),
+        ADD COLUMN IF NOT EXISTS "entityId" uuid
+    `);
+    await this.dataSource.query(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_entity ON knowledge_chunks ("entityType", "entityId")',
+    );
+    await this.dataSource.query(
+      'CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_tenant ON knowledge_chunks ("tenantId")',
     );
 
     // The same sync also wipes the stored vectors for rows that survive. Any
@@ -76,7 +93,13 @@ export class RagService implements OnModuleInit {
   async ingest(
     content: string,
     sourceType: KnowledgeSourceType,
-    meta: { vendorId?: string; skuId?: string } = {},
+    meta: {
+      vendorId?: string;
+      skuId?: string;
+      tenantId?: string;
+      entityType?: string;
+      entityId?: string;
+    } = {},
   ): Promise<IngestResult> {
     const trimmed = typeof content === 'string' ? content.trim() : '';
     if (!trimmed) {
@@ -94,10 +117,19 @@ export class RagService implements OnModuleInit {
     const vectorLiteral = `[${embedding.join(',')}]`;
 
     const rows = await this.dataSource.query(
-      `INSERT INTO knowledge_chunks (id, content, "sourceType", "vendorId", "skuId", embedding, "createdAt")
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::vector, NOW())
-       RETURNING id, content, "sourceType", "vendorId", "skuId", "createdAt"`,
-      [trimmed, sourceType, meta.vendorId ?? null, meta.skuId ?? null, vectorLiteral],
+      `INSERT INTO knowledge_chunks (id, content, "sourceType", "vendorId", "skuId", "tenantId", "entityType", "entityId", embedding, "createdAt")
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8::vector, NOW())
+       RETURNING id, content, "sourceType", "vendorId", "skuId", "tenantId", "entityType", "entityId", "createdAt"`,
+      [
+        trimmed,
+        sourceType,
+        meta.vendorId ?? null,
+        meta.skuId ?? null,
+        meta.tenantId ?? null,
+        meta.entityType ?? null,
+        meta.entityId ?? null,
+        vectorLiteral,
+      ],
     );
 
     const row = rows[0] as {
@@ -118,6 +150,8 @@ export class RagService implements OnModuleInit {
    * Embeds the query, finds the most similar chunks via cosine distance
    * (`<=>` operator), and returns them ranked with a similarity score.
    * Results below MIN_SCORE_THRESHOLD are too weak to be useful and are dropped.
+   * When tenantId is provided, results are scoped to that tenant (plus legacy
+   * chunks with NULL tenantId for backward compatibility).
    */
   async search(
     query: string,
@@ -140,6 +174,10 @@ export class RagService implements OnModuleInit {
     const params: unknown[] = [vectorLiteral];
     const conditions: string[] = ['1=1'];
 
+    if (filters.tenantId) {
+      params.push(filters.tenantId);
+      conditions.push(`("tenantId" = $${params.length} OR "tenantId" IS NULL)`);
+    }
     if (filters.vendorId) {
       params.push(filters.vendorId);
       conditions.push(`"vendorId" = $${params.length}`);
@@ -177,5 +215,49 @@ export class RagService implements OnModuleInit {
         score: typeof row.score === 'number' ? row.score : parseFloat(row.score),
       }))
       .filter((row) => row.score >= MIN_SCORE_THRESHOLD);
+  }
+
+  /**
+   * Upsert a knowledge chunk keyed by (tenantId, entityType, entityId).
+   * Deletes any existing chunk for the same entity first, then ingests fresh.
+   * This ensures answers don't go stale when source data changes.
+   */
+  async upsertForEntity(
+    tenantId: string,
+    entityType: string,
+    entityId: string,
+    sourceType: KnowledgeSourceType,
+    content: string,
+    meta: { vendorId?: string; skuId?: string } = {},
+  ): Promise<IngestResult> {
+    // Remove old chunk(s) for this entity
+    await this.dataSource.query(
+      `DELETE FROM knowledge_chunks WHERE "tenantId" = $1 AND "entityType" = $2 AND "entityId" = $3`,
+      [tenantId, entityType, entityId],
+    );
+
+    // Ingest fresh
+    return this.ingest(content, sourceType, {
+      ...meta,
+      tenantId,
+      entityType,
+      entityId,
+    });
+  }
+
+  /**
+   * Remove all knowledge chunks for a given entity.
+   * Used when the source entity is deleted (e.g. catalog entry removed).
+   */
+  async removeForEntity(
+    tenantId: string,
+    entityType: string,
+    entityId: string,
+  ): Promise<number> {
+    const result = await this.dataSource.query(
+      `DELETE FROM knowledge_chunks WHERE "tenantId" = $1 AND "entityType" = $2 AND "entityId" = $3`,
+      [tenantId, entityType, entityId],
+    );
+    return Array.isArray(result) ? result.length : (result as { rowCount?: number })?.rowCount ?? 0;
   }
 }

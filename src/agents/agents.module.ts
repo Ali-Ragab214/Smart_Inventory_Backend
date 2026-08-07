@@ -53,6 +53,6 @@ import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module'
     MastraService,
     AgentSchedulerService,
   ],
-  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MastraService],
+  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MastraService, GatewayLlmService],
 })
 export class AgentsModule {}

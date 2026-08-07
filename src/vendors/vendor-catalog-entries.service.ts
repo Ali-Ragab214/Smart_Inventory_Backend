@@ -16,6 +16,7 @@ import { paginate } from '../utils/pagination.util';
 import { applySortAndSearch } from '../utils/query.util';
 import { NotificationEvents } from '../notifications/events/notification-events';
 import { VendorRespondedEvent } from '../notifications/events/vendor-responded.event';
+import { RagEvents, VendorCatalogUpsertedEvent, VendorCatalogDeletedEvent } from '../rag/rag-events';
 
 @Injectable()
 export class VendorCatalogEntriesService {
@@ -53,6 +54,21 @@ export class VendorCatalogEntriesService {
         respondedAt: saved.createdAt.toISOString(),
       }),
     );
+
+    // Emit RAG ingestion event — need vendor name for the summary
+    const vendor = await this.catalogRepo.manager
+      .getRepository('Vendor')
+      .findOne({ where: { id: vendorId } }) as { name: string } | null;
+
+    this.eventEmitter.emit(RagEvents.VENDOR_CATALOG_UPSERTED, {
+      tenantId,
+      vendorId,
+      vendorName: vendor?.name ?? vendorId,
+      catalogEntryId: saved.id,
+      skuId: saved.skuId,
+      price: saved.price,
+      leadTimeDays: saved.leadTimeDays,
+    } satisfies VendorCatalogUpsertedEvent);
 
     return this.mapper.toResponse(saved);
   }
@@ -96,6 +112,22 @@ export class VendorCatalogEntriesService {
 
     const updated = this.mapper.updateEntity(entry, dto);
     const saved = await this.catalogRepo.save(updated);
+
+    // Emit RAG upsert on update — refreshes the knowledge chunk
+    const vendor = await this.catalogRepo.manager
+      .getRepository('Vendor')
+      .findOne({ where: { id: vendorId } }) as { name: string } | null;
+
+    this.eventEmitter.emit(RagEvents.VENDOR_CATALOG_UPSERTED, {
+      tenantId,
+      vendorId,
+      vendorName: vendor?.name ?? vendorId,
+      catalogEntryId: saved.id,
+      skuId: saved.skuId,
+      price: saved.price,
+      leadTimeDays: saved.leadTimeDays,
+    } satisfies VendorCatalogUpsertedEvent);
+
     return this.mapper.toResponse(saved);
   }
 
@@ -105,5 +137,12 @@ export class VendorCatalogEntriesService {
       throw new NotFoundException({ message: "We couldn't find a catalog entry for this product and vendor combination.", code: 'CATALOG_ENTRY_NOT_FOUND' });
     }
     await this.catalogRepo.softRemove(entry);
+
+    // Emit RAG deletion event
+    this.eventEmitter.emit(RagEvents.VENDOR_CATALOG_DELETED, {
+      tenantId,
+      vendorId,
+      catalogEntryId: id,
+    } satisfies VendorCatalogDeletedEvent);
   }
 }
