@@ -13,6 +13,7 @@ import { ApproveApprovalRequestDto, RejectApprovalRequestDto } from './dto/appro
 import { NotificationEvents } from '../notifications/events/notification-events';
 import { ApprovalRequestedEvent } from '../notifications/events/approval-requested.event';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
+import { RagEvents, NegotiationApprovedEvent } from '../rag/rag-events';
 
 @Injectable()
 export class ApprovalQueueService {
@@ -109,6 +110,18 @@ export class ApprovalQueueService {
     // Materialize an approved reorder proposal into purchase order(s).
     if (approval.agentType === 'reorder') {
       await this.finalizeReorderPo(tenantId, approval, reviewedBy);
+    } else if (approval.agentType === 'negotiation') {
+      const payload = approval.payload as Record<string, unknown> ?? {};
+      if (payload.vendorId) {
+        this.eventEmitter.emit(RagEvents.NEGOTIATION_APPROVED, {
+          tenantId,
+          approvalId: saved.id,
+          vendorId: payload.vendorId as string,
+          agentRunId: saved.agentRunId,
+          reasoning: saved.reasoning ?? '',
+          payload,
+        } satisfies NegotiationApprovedEvent);
+      }
     }
 
     return this.mapper.toResponse(saved);

@@ -13,6 +13,7 @@ import { StockMovementService } from '../inventory/stock-movements/stock-movemen
 import { MovementReason } from '../inventory/stock-movements/enums/movement-reason.enum';
 import { NotificationEvents } from '../notifications/events/notification-events';
 import { PoReceivedEvent } from '../notifications/events/po-received.event';
+import { RagEvents, PurchaseOrderSavedEvent } from '../rag/rag-events';
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   draft: ['pending_approval', 'rejected'],
@@ -41,6 +42,23 @@ export class PurchaseOrdersService {
       where: { id: saved.id },
       relations: { lineItems: true },
     });
+
+    // Emit RAG ingestion event for the new PO
+    this.eventEmitter.emit(RagEvents.PURCHASE_ORDER_SAVED, {
+      tenantId,
+      purchaseOrderId: loaded!.id,
+      vendorId: loaded!.vendorId,
+      warehouseId: loaded!.warehouseId,
+      status: loaded!.status,
+      createdBy: loaded!.createdBy,
+      negotiationRunId: loaded!.negotiationRunId,
+      lineItems: loaded!.lineItems.map((li) => ({
+        skuId: li.skuId,
+        quantity: li.quantity,
+        unitPrice: li.unitPrice,
+      })),
+    } satisfies PurchaseOrderSavedEvent);
+
     return this.mapper.toResponse(loaded!);
   }
 
@@ -139,6 +157,23 @@ export class PurchaseOrdersService {
       where: { id: saved.id },
       relations: { lineItems: true },
     });
+
+    // Emit RAG ingestion event for every status change (upsert replaces old chunk)
+    this.eventEmitter.emit(RagEvents.PURCHASE_ORDER_SAVED, {
+      tenantId,
+      purchaseOrderId: loaded!.id,
+      vendorId: loaded!.vendorId,
+      warehouseId: loaded!.warehouseId,
+      status: loaded!.status,
+      createdBy: loaded!.createdBy,
+      negotiationRunId: loaded!.negotiationRunId,
+      lineItems: loaded!.lineItems.map((li) => ({
+        skuId: li.skuId,
+        quantity: li.quantity,
+        unitPrice: li.unitPrice,
+      })),
+    } satisfies PurchaseOrderSavedEvent);
+
     return this.mapper.toResponse(loaded!);
   }
 }

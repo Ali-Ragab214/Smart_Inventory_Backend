@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Vendor } from './entities/vendor.entity';
@@ -14,6 +15,7 @@ import { VendorMapper } from './mappers/vendor.mapper';
 import { VendorQueryDto } from './dto/vendor-query.dto';
 import { paginate } from '../utils/pagination.util';
 import { applySortAndSearch } from '../utils/query.util';
+import { RagEvents, VendorDeletedEvent } from '../rag/rag-events';
 
 @Injectable()
 export class VendorsService {
@@ -23,6 +25,7 @@ export class VendorsService {
     @InjectRepository(VendorCatalogEntry)
     private readonly catalogEntryRepo: Repository<VendorCatalogEntry>,
     private readonly vendorMapper: VendorMapper,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(tenantId: string, dto: CreateVendorDto): Promise<VendorResponseDto> {
@@ -65,6 +68,13 @@ export class VendorsService {
       throw new NotFoundException({ message: 'The specified vendor could not be found.', code: 'VENDOR_NOT_FOUND' });
     }
     await this.vendorRepository.softRemove(vendor);
+
+    // Emit RAG deletion event
+    this.eventEmitter.emit(RagEvents.VENDOR_DELETED, {
+      tenantId,
+      vendorId: id,
+      vendorName: vendor.name,
+    } satisfies VendorDeletedEvent);
   }
 
   async findVendorsForSku(tenantId: string, skuId: string) {
