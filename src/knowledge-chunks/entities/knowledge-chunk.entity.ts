@@ -26,4 +26,15 @@ export class KnowledgeChunk extends AbstractEntity {
   @Index('idx_knowledge_chunks_sku')
   @Column('uuid', { nullable: true })
   skuId!: string | null;
+
+  @Index('idx_knowledge_chunks_tenant_kc')
+  @Column('uuid', { nullable: true })
+  tenantId!: string | null;
+
+  @Index('idx_knowledge_chunks_entity_type_kc')
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  entityType!: string | null;
+
+  @Column('uuid', { nullable: true })
+  entityId!: string | null;
 }
