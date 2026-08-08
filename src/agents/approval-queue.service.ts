@@ -58,15 +58,20 @@ export class ApprovalQueueService {
     return this.mapper.toResponse(saved);
   }
 
-  async findPending(
+  async findAll(
     tenantId: string,
     query: ApprovalQueryDto,
   ): Promise<{ data: ApprovalRequestResponseDto[]; total: number }> {
     const qb = this.approvalRepo
       .createQueryBuilder('approval')
-      .where('approval.status = :status', { status: 'pending' })
-      .andWhere('approval.tenantId = :tenantId', { tenantId })
+      .where('approval.tenantId = :tenantId', { tenantId })
       .orderBy('approval.createdAt', 'DESC');
+
+    if (query.status) {
+      qb.andWhere('approval.status = :status', {
+        status: query.status,
+      });
+    }
 
     if (query.agentType) {
       qb.andWhere('approval.agentType = :agentType', {
@@ -86,7 +91,7 @@ export class ApprovalQueueService {
     id: string,
     reviewedBy: string,
     editedPayload?: object,
-  ): Promise<ApprovalRequestResponseDto> {
+  ): Promise<ApprovalRequestResponseDto & { createdPoIds?: string[] }> {
     const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
       throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
@@ -108,8 +113,9 @@ export class ApprovalQueueService {
     await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'completed');
 
     // Materialize an approved reorder proposal into purchase order(s).
+    let createdPoIds: string[] = [];
     if (approval.agentType === 'reorder') {
-      await this.finalizeReorderPo(tenantId, approval, reviewedBy);
+      createdPoIds = await this.finalizeReorderPo(tenantId, approval, reviewedBy);
     } else if (approval.agentType === 'negotiation') {
       const payload = approval.payload as Record<string, unknown> ?? {};
       if (payload.vendorId) {
@@ -124,23 +130,24 @@ export class ApprovalQueueService {
       }
     }
 
-    return this.mapper.toResponse(saved);
+    return { ...this.mapper.toResponse(saved), createdPoIds };
   }
 
   private async finalizeReorderPo(
     tenantId: string,
     approval: ApprovalRequest,
     reviewedBy: string,
-  ): Promise<void> {
+  ): Promise<string[]> {
     const payload = (approval.payload ?? {}) as Record<string, unknown>;
     const vendorId = payload.vendorId as string | undefined;
     const items = Array.isArray(payload.items) ? (payload.items as Array<Record<string, unknown>>) : [];
+    const createdPoIds: string[] = [];
 
     if (!vendorId || items.length === 0) {
       this.logger.warn(
         `Cannot create PO for approval ${approval.id}: missing vendorId or line items.`,
       );
-      return;
+      return createdPoIds;
     }
 
     const byWarehouse = new Map<string, Array<Record<string, unknown>>>();
@@ -168,7 +175,9 @@ export class ApprovalQueueService {
           warehouseId,
           lineItems,
           createdBy: reviewedBy,
+          approvalRequestId: approval.id,
         });
+        createdPoIds.push(po.id);
         this.logger.log(
           `Approval ${approval.id} finalized into PO ${po.id} (warehouse ${warehouseId}, ${lineItems.length} line item(s)).`,
         );
@@ -178,6 +187,8 @@ export class ApprovalQueueService {
         );
       }
     }
+
+    return createdPoIds;
   }
 
   async reject(

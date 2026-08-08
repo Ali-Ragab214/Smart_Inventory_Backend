@@ -13,6 +13,7 @@ export class PurchaseOrderResponseDto {
   status!: string;
   createdBy!: string;
   negotiationRunId!: string | null;
+  approvalRequestId!: string | null;
   lineItems!: PurchaseOrderLineItemResponseDto[];
   createdAt!: Date;
   updatedAt!: Date;

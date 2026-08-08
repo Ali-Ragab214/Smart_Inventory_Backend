@@ -11,6 +11,7 @@ export class PurchaseOrderMapper {
     po.vendorId = createDto.vendorId;
     po.warehouseId = createDto.warehouseId;
     po.createdBy = createDto.createdBy ?? 'manual';
+    po.approvalRequestId = createDto.approvalRequestId ?? null;
     po.lineItems = createDto.lineItems.map((item) => this.toLineItemEntity(item));
     return po;
   }
@@ -31,6 +32,7 @@ export class PurchaseOrderMapper {
     dto.status = po.status;
     dto.createdBy = po.createdBy;
     dto.negotiationRunId = po.negotiationRunId;
+    dto.approvalRequestId = po.approvalRequestId;
     dto.lineItems = (po.lineItems ?? []).map((item) => this.toLineItemResponse(item));
     dto.createdAt = po.createdAt;
     dto.updatedAt = po.updatedAt;
