@@ -45,4 +45,8 @@ export class CreatePurchaseOrderDto {
   @IsString()
   @IsOptional()
   createdBy?: string;
+
+  @IsUUID()
+  @IsOptional()
+  approvalRequestId?: string;
 }
