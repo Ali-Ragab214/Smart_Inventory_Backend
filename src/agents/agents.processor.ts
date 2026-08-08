@@ -9,6 +9,9 @@ import { RagService, SearchResult } from '../rag/rag.service';
 import { StockLevel } from '../inventory/stock-levels/entities/stock-level.entity';
 import { Vendor } from '../vendors/entities/vendor.entity';
 import { Sku } from '../sku/entities/sku.entity';
+import { ToolExecutorService } from './tool-executor.service';
+import { InventoryService } from './inventory.service';
+import { ReorderDecisionSchema, NegotiationDecisionSchema } from './agent-ai.schemas';
 
 @Processor('agent-jobs')
 export class AgentsProcessor extends WorkerHost {
@@ -20,6 +23,8 @@ export class AgentsProcessor extends WorkerHost {
     private readonly approvalQueueService: ApprovalQueueService,
     private readonly ragService: RagService,
     private readonly dataSource: DataSource,
+    private readonly toolExecutor: ToolExecutorService,
+    private readonly inventoryService: InventoryService,
   ) {
     super();
   }
@@ -95,25 +100,57 @@ export class AgentsProcessor extends WorkerHost {
       safetyStock: sl.safetyStock,
     }));
 
+    // Enrich each item with real vendor catalog data (price + lead time) so the
+    // agent drafts quantities/prices from actual catalog entries, not guesses.
+    const enrichedContext = await Promise.all(
+      context.map(async (item) => {
+        try {
+          const vendors = (await this.toolExecutor.execute(
+            tenantId,
+            'get_vendors_for_sku',
+            { skuId: item.skuId },
+          )) as Array<{ vendorId: string; vendorName: string; price: number; leadTimeDays: number }>;
+          return { ...item, catalogs: Array.isArray(vendors) ? vendors : [] };
+        } catch (err) {
+          this.logger.warn(`No catalogs for SKU ${item.skuId}: ${(err as Error).message}`);
+          return { ...item, catalogs: [] };
+        }
+      }),
+    );
+
     const systemPrompt =
       'You are a purchasing / replenishment agent for an inventory management system. ' +
-      'You receive JSON items that are at or below their reorder threshold. ' +
-      'Draft a purchase order recommendation and respond with ONLY a valid JSON object matching this schema, no markdown fences, no other text:\n' +
+      'You receive JSON items at or below their reorder threshold, each with its real vendor catalog ' +
+      'entries (price and lead time). When drafting the purchase order: choose a vendor for each item, ' +
+      'use the ACTUAL catalog unitPrice from your preferred vendor for the item, prefer the cheapest ' +
+      'unitPrice or the vendor with the best lead time, and never invent a unitPrice absent from the catalog. ' +
+      'Respond with ONLY a valid JSON object matching this schema, no markdown fences, no other text:\n' +
       '{"reasoning": string, "confidenceScore": number 0-100, "paymentTerms": string, ' +
       '"items": [{"skuId": string, "sku": string, "productName": string, "warehouse": string, ' +
+      '"vendorId": string, "vendorName": string, "unitPrice": number, ' +
       '"currentQuantity": number, "reorderThreshold": number, "recommendedQuantity": number, ' +
-      '"unitPrice": number, "lineTotal": number}]}';
+      '"lineTotal": number}]}';
 
     const raw = await this.gatewayLlm.chat(
       systemPrompt,
-      JSON.stringify({ lowStockItems: context }),
+      JSON.stringify({ lowStockItems: enrichedContext }),
     );
 
     let draft: Record<string, unknown> = {};
     try {
-      draft = JSON.parse(this.stripFences(raw));
+      const result = JSON.parse(this.stripFences(raw)) as Record<string, unknown>;
+      const parsed = ReorderDecisionSchema.parse(result);
+      draft = parsed as unknown as Record<string, unknown>;
     } catch {
-      draft = { rawDraft: raw };
+      try {
+        const result = JSON.parse(this.stripFences(raw)) as Record<string, unknown>;
+        const parsed = ReorderDecisionSchema.safeParse(result);
+        if (parsed.success) {
+          draft = parsed.data as unknown as Record<string, unknown>;
+        }
+      } catch {
+        draft = { rawDraft: raw };
+      }
     }
 
     const items = Array.isArray(draft.items)
@@ -146,12 +183,28 @@ export class AgentsProcessor extends WorkerHost {
       };
     };
 
+    // When possible, derive the PO-level vendor from the vendor the agent chose
+    // for the majority of drafted items (falls back to run/related or preferred).
+    const itemVendors = items
+      .map((i) => (i as Record<string, unknown>).vendorId)
+      .filter((v): v is string => typeof v === 'string' && v.length > 0);
+    const majorityVendorId = itemVendors.reduce<{ id?: string; count: number }>(
+      (acc, id) => {
+        const counts = itemVendors.filter((v) => v === id).length;
+        return counts > acc.count ? { id, count: counts } : acc;
+      },
+      { count: 0 },
+    ).id;
+
     const payload = {
       ...draft,
       items: items.map(itemWithWarehouseId),
       proposedValue,
       currency: 'USD',
-      vendorId: await this.resolveVendorId(run),
+      vendorId:
+        majorityVendorId ??
+        (await this.resolveVendorId(run)) ??
+        (itemVendors[0] ?? null),
       generatedAt: new Date().toISOString(),
     };
 
@@ -223,9 +276,19 @@ export class AgentsProcessor extends WorkerHost {
 
     let draft: Record<string, unknown> = {};
     try {
-      draft = JSON.parse(this.stripFences(raw));
+      const result = JSON.parse(this.stripFences(raw)) as Record<string, unknown>;
+      const parsed = NegotiationDecisionSchema.parse(result);
+      draft = parsed as unknown as Record<string, unknown>;
     } catch {
-      draft = { emailContent: raw };
+      try {
+        const result = JSON.parse(this.stripFences(raw)) as Record<string, unknown>;
+        const parsed = NegotiationDecisionSchema.safeParse(result);
+        if (parsed.success) {
+          draft = parsed.data as unknown as Record<string, unknown>;
+        }
+      } catch {
+        draft = { emailContent: raw };
+      }
     }
 
     const payload = {
@@ -267,20 +330,71 @@ export class AgentsProcessor extends WorkerHost {
   ): Promise<void> {
     const instructions: Record<string, string> = {
       anomaly:
-        'You are an inventory anomaly detection assistant. Review the provided context for suspicious stock patterns and summarize your findings concisely.',
+        'You are an inventory anomaly detection assistant. Review the provided real stock movement history ' +
+        'and current stock levels for suspicious patterns (unexpected drops, abnormal order quantities, ' +
+        'or incorrectly shipped/deleted records) and summarize your findings concisely. Cite the actual SKU, ' +
+        'date, movement type, and quantity for each finding without inventing events.',
       forecasting:
-        'You are a demand forecasting assistant. Analyze the provided historical stock movement data and project future demand concisely.',
+        'You are a demand forecasting assistant. Analyze the provided real historical stock movement data ' +
+        'for each SKU and project future demand concisely. Base projections only on the supplied movements; ' +
+        'state both the observed trend and your projected next-period demand per SKU.',
     };
 
     const systemPrompt =
       instructions[agentType] ?? 'You are an inventory assistant. Respond concisely.';
 
+    // Wire the real inventory data into the context so the LLM reasons over true
+    // movement history + low-stock levels instead of just ids.
+    const skuIds: string[] = (run.skuIds ?? []).slice(0, 6);
+    const stockContext: Array<Record<string, unknown>> = [];
+
+    for (const skuId of skuIds) {
+      try {
+        const sku = await this.inventoryService.findSku(tenantId, skuId);
+        const history = await this.inventoryService.getMovementHistory(tenantId, skuId);
+        stockContext.push({
+          skuId,
+          sku: sku?.sku ?? null,
+          productName: sku?.name ?? null,
+          movementCount: history.length,
+          movements: history.slice(0, 30).map((m: any) => ({
+            date: m.createdAt ?? m.date ?? null,
+            type: m.type ?? m.movementType ?? null,
+            quantity: m.quantity ?? null,
+            reference: m.reference ?? null,
+            note: m.note ?? null,
+          })),
+        });
+      } catch (err) {
+        this.logger.warn(`Failed to load history for SKU ${skuId}: ${(err as Error).message}`);
+      }
+    }
+
+    let lowStockContext: unknown[] = [];
+    if (agentType === 'anomaly') {
+      try {
+        const low = await this.inventoryService.findLowStock(tenantId);
+        lowStockContext = low.map((sl: any) => ({
+          skuId: sl.skuId,
+          sku: sl.sku?.sku ?? null,
+          productName: sl.sku?.name ?? null,
+          warehouse: sl.warehouse?.name ?? null,
+          quantity: sl.quantity ?? null,
+          reorderThreshold: sl.reorderThreshold ?? null,
+        }));
+      } catch (err) {
+        this.logger.warn(`Failed to load low-stock levels: ${(err as Error).message}`);
+      }
+    }
+
     const raw = await this.gatewayLlm.chat(
       systemPrompt,
       JSON.stringify({
         runId,
-        skuIds: run.skuIds ?? [],
+        skuIds,
         vendorId: run.relatedVendorId ?? null,
+        stock: stockContext,
+        lowStock: lowStockContext,
       }),
     );
 
