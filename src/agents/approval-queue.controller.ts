@@ -32,10 +32,10 @@ export class ApprovalQueueController {
   constructor(private readonly service: ApprovalQueueService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List pending approval requests' })
+  @ApiOperation({ summary: 'List approval requests (optionally filtered by status)' })
   @ApiOkResponse({ type: ApprovalRequestResponseDto, isArray: true })
   async findAll(@Query() query: ApprovalQueryDto, @CurrentUser() user: UserResponseDto) {
-    const { data, total } = await this.service.findPending(user.tenantId!, query);
+    const { data, total } = await this.service.findAll(user.tenantId!, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
