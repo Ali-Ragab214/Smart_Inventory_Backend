@@ -30,4 +30,7 @@ export class AgentRun extends AbstractTenantEntity {
 
   @Column('uuid', { nullable: true })
   relatedPoId!: string | null;
+
+  @Column('uuid', { nullable: true })
+  contextRunId!: string | null;
 }

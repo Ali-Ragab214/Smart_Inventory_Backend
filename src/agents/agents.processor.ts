@@ -3,7 +3,6 @@ import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AgentRunService, AgentType } from './agent-run.service';
-import { GatewayLlmService } from './gateway-llm.service';
 import { ApprovalQueueService } from './approval-queue.service';
 import { RagService, SearchResult } from '../rag/rag.service';
 import { StockLevel } from '../inventory/stock-levels/entities/stock-level.entity';
@@ -11,6 +10,7 @@ import { Vendor } from '../vendors/entities/vendor.entity';
 import { Sku } from '../sku/entities/sku.entity';
 import { ToolExecutorService } from './tool-executor.service';
 import { InventoryService } from './inventory.service';
+import { MastraService, AgentName } from './mastra.service';
 import { ReorderDecisionSchema, NegotiationDecisionSchema } from './agent-ai.schemas';
 
 @Processor('agent-jobs')
@@ -18,7 +18,7 @@ export class AgentsProcessor extends WorkerHost {
   private readonly logger = new Logger(AgentsProcessor.name);
 
   constructor(
-    private readonly gatewayLlm: GatewayLlmService,
+    private readonly mastraService: MastraService,
     private readonly agentRunService: AgentRunService,
     private readonly approvalQueueService: ApprovalQueueService,
     private readonly ragService: RagService,
@@ -118,23 +118,13 @@ export class AgentsProcessor extends WorkerHost {
       }),
     );
 
-    const systemPrompt =
-      'You are a purchasing / replenishment agent for an inventory management system. ' +
-      'You receive JSON items at or below their reorder threshold, each with its real vendor catalog ' +
-      'entries (price and lead time). When drafting the purchase order: choose a vendor for each item, ' +
-      'use the ACTUAL catalog unitPrice from your preferred vendor for the item, prefer the cheapest ' +
-      'unitPrice or the vendor with the best lead time, and never invent a unitPrice absent from the catalog. ' +
-      'Respond with ONLY a valid JSON object matching this schema, no markdown fences, no other text:\n' +
-      '{"reasoning": string, "confidenceScore": number 0-100, "paymentTerms": string, ' +
-      '"items": [{"skuId": string, "sku": string, "productName": string, "warehouse": string, ' +
-      '"vendorId": string, "vendorName": string, "unitPrice": number, ' +
-      '"currentQuantity": number, "reorderThreshold": number, "recommendedQuantity": number, ' +
-      '"lineTotal": number}]}';
-
-    const raw = await this.gatewayLlm.chat(
-      systemPrompt,
+    const decision = await this.mastraService.runAgent(
+      'reorder',
+      tenantId,
       JSON.stringify({ lowStockItems: enrichedContext }),
+      { runId, maxSteps: 8 },
     );
+    const raw = decision.text;
 
     let draft: Record<string, unknown> = {};
     try {
@@ -262,17 +252,13 @@ export class AgentsProcessor extends WorkerHost {
       this.logger.warn(`Knowledge base search failed: ${(err as Error).message}`);
     }
 
-    const systemPrompt =
-      'You are a vendor negotiation agent for an inventory system. ' +
-      'Using ONLY the provided vendor knowledge base context, draft a professional email to the vendor ' +
-      'requesting a discount, better pricing, or improved payment terms. Do not invent facts that are not present in the context. ' +
-      'Respond with ONLY a valid JSON object, no markdown fences, no other text, matching this schema:\n' +
-      '{"subject": string, "emailContent": string, "requestedDiscountPercent": number, "confidenceScore": number 0-100, "reasoning": string}';
-
-    const raw = await this.gatewayLlm.chat(
-      systemPrompt,
+    const negotiation = await this.mastraService.runAgent(
+      'negotiation',
+      tenantId,
       `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\n\nKnowledge base context:\n${kbContext}`,
+      { runId, maxSteps: 4 },
     );
+    const raw = negotiation.text;
 
     let draft: Record<string, unknown> = {};
     try {
@@ -328,21 +314,6 @@ export class AgentsProcessor extends WorkerHost {
     runId: string,
     agentType: AgentType,
   ): Promise<void> {
-    const instructions: Record<string, string> = {
-      anomaly:
-        'You are an inventory anomaly detection assistant. Review the provided real stock movement history ' +
-        'and current stock levels for suspicious patterns (unexpected drops, abnormal order quantities, ' +
-        'or incorrectly shipped/deleted records) and summarize your findings concisely. Cite the actual SKU, ' +
-        'date, movement type, and quantity for each finding without inventing events.',
-      forecasting:
-        'You are a demand forecasting assistant. Analyze the provided real historical stock movement data ' +
-        'for each SKU and project future demand concisely. Base projections only on the supplied movements; ' +
-        'state both the observed trend and your projected next-period demand per SKU.',
-    };
-
-    const systemPrompt =
-      instructions[agentType] ?? 'You are an inventory assistant. Respond concisely.';
-
     // Wire the real inventory data into the context so the LLM reasons over true
     // movement history + low-stock levels instead of just ids.
     const skuIds: string[] = (run.skuIds ?? []).slice(0, 6);
@@ -387,8 +358,9 @@ export class AgentsProcessor extends WorkerHost {
       }
     }
 
-    const raw = await this.gatewayLlm.chat(
-      systemPrompt,
+    const result = await this.mastraService.runAgent(
+      agentType as AgentName,
+      tenantId,
       JSON.stringify({
         runId,
         skuIds,
@@ -396,14 +368,16 @@ export class AgentsProcessor extends WorkerHost {
         stock: stockContext,
         lowStock: lowStockContext,
       }),
+      { runId, maxSteps: 4 },
     );
+    const raw = result.text;
 
     await this.agentRunService.appendStep(
       tenantId,
       runId,
       { input: `${agentType} workflow` },
       { result: raw },
-      'Agent executed via gateway',
+      'Agent executed via Mastra',
     );
     await this.agentRunService.updateStatus(tenantId, runId, 'completed');
   }
