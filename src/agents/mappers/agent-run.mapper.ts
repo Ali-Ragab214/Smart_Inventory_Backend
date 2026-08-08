@@ -15,6 +15,9 @@ export class AgentRunMapper {
     dto.skuIds = entity.skus?.map(sku => sku.id) ?? [];
     dto.relatedVendorId = entity.relatedVendorId;
     dto.relatedPoId = entity.relatedPoId;
+    dto.roundNumber = entity.roundNumber;
+    dto.maxRounds = entity.maxRounds;
+    dto.contextRunId = entity.contextRunId;
     dto.createdAt = entity.createdAt;
     dto.updatedAt = entity.updatedAt;
     return dto;

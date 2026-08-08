@@ -13,6 +13,17 @@ import { InventoryService } from './inventory.service';
 import { MastraService, AgentName } from './mastra.service';
 import { ReorderDecisionSchema, NegotiationDecisionSchema } from './agent-ai.schemas';
 
+type AgentJobData = {
+  runId: string;
+  agentType: AgentType;
+  tenantId: string;
+  draftType?: 'opening' | 'counter';
+  counterDiscountPercent?: number;
+  vendorReply?: string;
+  roundNumber?: number;
+  offeredDiscountPercent?: number;
+};
+
 @Processor('agent-jobs')
 export class AgentsProcessor extends WorkerHost {
   private readonly logger = new Logger(AgentsProcessor.name);
@@ -29,7 +40,7 @@ export class AgentsProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<{ runId: string; agentType: AgentType; tenantId: string }>): Promise<void> {
+  async process(job: Job<AgentJobData>): Promise<void> {
     if (job.name !== 'run-agent-step') return;
 
     const { runId, agentType, tenantId } = job.data;
@@ -44,7 +55,7 @@ export class AgentsProcessor extends WorkerHost {
       if (agentType === 'reorder') {
         await this.runReorder(tenantId, run, runId);
       } else if (agentType === 'negotiation') {
-        await this.runNegotiation(tenantId, run, runId);
+        await this.runNegotiation(tenantId, run, runId, job.data);
       } else {
         await this.runGeneric(tenantId, run, runId, agentType);
       }
@@ -220,8 +231,17 @@ export class AgentsProcessor extends WorkerHost {
     this.logger.log(`Reorder agent completed; approval submitted for run ${runId}.`);
   }
 
-  private async runNegotiation(tenantId: string, run: any, runId: string): Promise<void> {
+  private async runNegotiation(
+    tenantId: string,
+    run: any,
+    runId: string,
+    jobData: Partial<AgentJobData> = {},
+  ): Promise<void> {
     const vendorId: string | null = await this.resolveVendorId(run);
+    const draftType = jobData.draftType ?? 'opening';
+    const roundNumber: number = jobData.roundNumber ?? run.roundNumber ?? 1;
+    const counterDiscountPercent = jobData.counterDiscountPercent;
+    const vendorReply = jobData.vendorReply;
 
     let vendorName: string | null = null;
     if (vendorId) {
@@ -252,10 +272,15 @@ export class AgentsProcessor extends WorkerHost {
       this.logger.warn(`Knowledge base search failed: ${(err as Error).message}`);
     }
 
+    const negotiationPrompt =
+      draftType === 'counter'
+        ? `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\n\nThis is round ${roundNumber} of negotiation. The vendor rejected our previous offer and replied:\n"${vendorReply ?? ''}"\nTheir counter suggestion is ${counterDiscountPercent ?? 'unknown'}% discount.\n\nKnowledge base context:\n${kbContext}`
+        : `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\n\nRound ${roundNumber} — opening offer.\n\nKnowledge base context:\n${kbContext}`;
+
     const negotiation = await this.mastraService.runAgent(
       'negotiation',
       tenantId,
-      `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\n\nKnowledge base context:\n${kbContext}`,
+      negotiationPrompt,
       { runId, maxSteps: 4 },
     );
     const raw = negotiation.text;
@@ -284,6 +309,8 @@ export class AgentsProcessor extends WorkerHost {
       requestedDiscountPercent: Number(draft.requestedDiscountPercent || 0),
       confidenceScore: Number(draft.confidenceScore || 0),
       proposedValue: Number(draft.requestedDiscountPercent || 0),
+      round: roundNumber,
+      draftType,
     };
 
     await this.approvalQueueService.create(tenantId, {
@@ -294,7 +321,9 @@ export class AgentsProcessor extends WorkerHost {
       reasoning:
         typeof draft.reasoning === 'string'
           ? draft.reasoning
-          : 'Negotiation Agent drafted an email to the vendor requesting better terms.',
+          : draftType === 'counter'
+            ? `Round ${roundNumber} counter-proposal drafted after vendor's ${counterDiscountPercent}% counter.`
+            : 'Negotiation Agent drafted an email to the vendor requesting better terms.',
     });
 
     await this.agentRunService.appendStep(

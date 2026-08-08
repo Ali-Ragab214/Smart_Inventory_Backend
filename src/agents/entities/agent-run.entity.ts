@@ -12,10 +12,29 @@ export class AgentRun extends AbstractTenantEntity {
 
   @Column({
     type: 'enum',
-    enum: ['in_progress', 'awaiting_approval', 'completed', 'rejected', 'escalated'],
+    enum: [
+      'in_progress',
+      'awaiting_approval',
+      'sent',
+      'awaiting_vendor_response',
+      'evaluating_counteroffer',
+      'finalizing',
+      'completed',
+      'rejected',
+      'escalated',
+    ],
     default: 'in_progress',
   })
   status!: string;
+
+  @Column('int', { default: 1 })
+  roundNumber!: number;
+
+  @Column('int', { default: 3 })
+  maxRounds!: number;
+
+  @Column({ type: 'jsonb', nullable: true })
+  negotiationItems!: Array<Record<string, unknown>> | null;
 
   @ManyToMany(() => Sku)
   @JoinTable({

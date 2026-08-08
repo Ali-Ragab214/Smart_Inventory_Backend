@@ -20,6 +20,10 @@ export type AgentType = 'forecasting' | 'reorder' | 'negotiation' | 'anomaly';
 export type AgentRunStatus =
   | 'in_progress'
   | 'awaiting_approval'
+  | 'sent'
+  | 'awaiting_vendor_response'
+  | 'evaluating_counteroffer'
+  | 'finalizing'
   | 'completed'
   | 'rejected'
   | 'escalated';
@@ -29,6 +33,7 @@ export type AgentRunRelatedInput = {
   vendorId?: string;
   poId?: string;
   contextRunId?: string;
+  negotiationItems?: Array<Record<string, unknown>>;
 };
 
 const VALID_AGENT_TYPES: AgentType[] = [
@@ -41,6 +46,10 @@ const VALID_AGENT_TYPES: AgentType[] = [
 const VALID_STATUSES: AgentRunStatus[] = [
   'in_progress',
   'awaiting_approval',
+  'sent',
+  'awaiting_vendor_response',
+  'evaluating_counteroffer',
+  'finalizing',
   'completed',
   'rejected',
   'escalated',
@@ -72,14 +81,37 @@ export class AgentRunService {
       relatedVendorId: related.vendorId ?? null,
       relatedPoId: related.poId ?? null,
       contextRunId: related.contextRunId ?? null,
+      roundNumber: 1,
+      maxRounds: 3,
+      negotiationItems: related.negotiationItems ?? null,
     });
 
     const saved = await this.runRepository.save(run);
     return successResponse(this.mapper.toRunResponse(saved));
   }
 
-  async enqueue(tenantId: string, runId: string, agentType: AgentType): Promise<void> {
-    await this.agentQueue.add('run-agent-step', { tenantId, runId, agentType });
+  async enqueue(
+    tenantId: string,
+    runId: string,
+    agentType: AgentType,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    await this.agentQueue.add('run-agent-step', {
+      tenantId,
+      runId,
+      agentType,
+      ...extra,
+    });
+  }
+
+  async advanceRound(tenantId: string, runId: string): Promise<number> {
+    const run = await this.runRepository.findOne({ where: { id: runId, tenantId } });
+    if (!run) {
+      throw new NotFoundException({ message: 'The requested agent run could not be found.', code: 'AGENT_RUN_NOT_FOUND' });
+    }
+    run.roundNumber += 1;
+    const saved = await this.runRepository.save(run);
+    return saved.roundNumber;
   }
 
   async load(tenantId: string, runId: string) {
