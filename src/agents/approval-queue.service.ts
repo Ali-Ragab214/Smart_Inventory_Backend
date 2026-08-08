@@ -176,6 +176,7 @@ export class ApprovalQueueService {
           lineItems,
           createdBy: reviewedBy,
           approvalRequestId: approval.id,
+          status: 'pending_approval',
         });
         createdPoIds.push(po.id);
         this.logger.log(

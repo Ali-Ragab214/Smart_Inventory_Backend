@@ -1,6 +1,7 @@
 import { Type, Transform } from 'class-transformer';
 import {
   IsArray,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -49,4 +50,8 @@ export class CreatePurchaseOrderDto {
   @IsUUID()
   @IsOptional()
   approvalRequestId?: string;
+
+  @IsOptional()
+  @IsIn(['draft', 'pending_approval', 'approved'])
+  status?: string;
 }

@@ -12,6 +12,7 @@ export class PurchaseOrderMapper {
     po.warehouseId = createDto.warehouseId;
     po.createdBy = createDto.createdBy ?? 'manual';
     po.approvalRequestId = createDto.approvalRequestId ?? null;
+    po.status = createDto.status ?? 'draft';
     po.lineItems = createDto.lineItems.map((item) => this.toLineItemEntity(item));
     return po;
   }
