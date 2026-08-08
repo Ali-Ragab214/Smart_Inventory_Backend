@@ -25,11 +25,14 @@ import { InventoryService } from './inventory.service';
 import { ToolExecutorService } from './tool-executor.service';
 import { MastraService } from './mastra.service';
 import { AgentSchedulerService } from './agent-scheduler.service';
+import { SimulatedVendorService } from './simulated-vendor.service';
+import { NegotiationStateMachineService } from './negotiation-state-machine.service';
+import { VendorNegotiationProfile } from './entities/vendor-negotiation-profile.entity';
 import { RagModule } from '../rag/rag.module';
 import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module';
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AgentRun, AgentStep, ApprovalRequest, AnomalyFlag, User]),
+    TypeOrmModule.forFeature([AgentRun, AgentStep, ApprovalRequest, AnomalyFlag, User, VendorNegotiationProfile]),
     BullModule.registerQueue({ name: 'agent-jobs' }),
     SkuModule,
     InventoryModule,
@@ -52,7 +55,9 @@ import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module'
     ToolExecutorService,
     MastraService,
     AgentSchedulerService,
+    SimulatedVendorService,
+    NegotiationStateMachineService,
   ],
-  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MastraService, GatewayLlmService],
+  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MastraService, GatewayLlmService, SimulatedVendorService],
 })
 export class AgentsModule {}

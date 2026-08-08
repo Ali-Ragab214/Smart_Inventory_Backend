@@ -5,6 +5,9 @@ export class AgentRunResponseDto {
   skuIds!: string[];
   relatedVendorId!: string | null;
   relatedPoId!: string | null;
+  roundNumber!: number;
+  maxRounds!: number;
+  contextRunId!: string | null;
   createdAt!: Date;
   updatedAt!: Date;
 }

@@ -14,6 +14,7 @@ import { NotificationEvents } from '../notifications/events/notification-events'
 import { ApprovalRequestedEvent } from '../notifications/events/approval-requested.event';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 import { RagEvents, NegotiationApprovedEvent } from '../rag/rag-events';
+import { SimulatedVendorService } from './simulated-vendor.service';
 
 @Injectable()
 export class ApprovalQueueService {
@@ -25,6 +26,7 @@ export class ApprovalQueueService {
     private readonly mapper: ApprovalRequestMapper,
     private readonly agentRunService: AgentRunService,
     private readonly purchaseOrdersService: PurchaseOrdersService,
+    private readonly simulatedVendorService: SimulatedVendorService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -110,23 +112,30 @@ export class ApprovalQueueService {
     const saved = await this.approvalRepo.save(approval);
 
     // Finalize the agent run once the request has been decided.
-    await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'completed');
+    if (approval.agentType === 'reorder') {
+      await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'completed');
+    }
 
     // Materialize an approved reorder proposal into purchase order(s).
     let createdPoIds: string[] = [];
     if (approval.agentType === 'reorder') {
       createdPoIds = await this.finalizeReorderPo(tenantId, approval, reviewedBy);
     } else if (approval.agentType === 'negotiation') {
-      const payload = approval.payload as Record<string, unknown> ?? {};
-      if (payload.vendorId) {
-        this.eventEmitter.emit(RagEvents.NEGOTIATION_APPROVED, {
+      if (approval.stepNumber === 2) {
+        // Final sign-off → negotiate final PO at the agreed discounted prices.
+        createdPoIds = await this.finalizeNegotiationPo(tenantId, saved, reviewedBy);
+        await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'completed');
+      } else {
+        // Step 1 (Vendor Outreach) approved → send the offer to the simulated vendor.
+        await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'sent');
+        const payload = (saved.payload ?? {}) as Record<string, unknown>;
+        const offeredDiscount = Number(payload.requestedDiscountPercent ?? payload.finalDiscountPercent ?? 0);
+        await this.simulatedVendorService.respondToOffer(
           tenantId,
-          approvalId: saved.id,
-          vendorId: payload.vendorId as string,
-          agentRunId: saved.agentRunId,
-          reasoning: saved.reasoning ?? '',
-          payload,
-        } satisfies NegotiationApprovedEvent);
+          saved.agentRunId,
+          offeredDiscount,
+          saved.id,
+        );
       }
     }
 
@@ -192,6 +201,96 @@ export class ApprovalQueueService {
     return createdPoIds;
   }
 
+  /** 3.3 — Final sign-off of a negotiated round: create PO(s) at agreed discounts. */
+  private async finalizeNegotiationPo(
+    tenantId: string,
+    approval: ApprovalRequest,
+    reviewedBy: string,
+  ): Promise<string[]> {
+    const payload = (approval.payload ?? {}) as Record<string, unknown>;
+    const vendorId = (payload.vendorId as string | undefined) ?? undefined;
+    const finalDiscount = Number(
+      payload.finalDiscountPercent ?? payload.final ?? payload.requestedDiscountPercent ?? 0,
+    );
+    const createdPoIds: string[] = [];
+
+    if (!vendorId) {
+      this.logger.warn(`Cannot create negotiated PO for approval ${approval.id}: missing vendorId.`);
+      return createdPoIds;
+    }
+
+    const run = (await this.agentRunService.load(tenantId, approval.agentRunId) as any)?.data
+      ?.run as any;
+    const items: Array<Record<string, unknown>> =
+      (run?.negotiationItems as Array<Record<string, unknown>> | undefined) ??
+      (Array.isArray(payload.items) ? (payload.items as Array<Record<string, unknown>>) : []) ??
+      [];
+
+    if (items.length === 0) {
+      this.logger.warn(`Cannot create negotiated PO for approval ${approval.id}: no items.`);
+      return createdPoIds;
+    }
+
+    const byWarehouse = new Map<string, Array<Record<string, unknown>>>();
+    for (const item of items) {
+      const warehouseId = item.warehouseId as string | undefined;
+      if (!warehouseId) continue;
+      const group = byWarehouse.get(warehouseId) ?? [];
+      group.push(item);
+      byWarehouse.set(warehouseId, group);
+    }
+
+    for (const [warehouseId, groupItems] of byWarehouse) {
+      const lineItems = groupItems
+        .map((item) => {
+          const basePrice = Math.max(0, Number(item.unitPrice || 0));
+          const unitPrice =
+            Math.round(basePrice * (1 - finalDiscount / 100) * 10000) / 10000;
+          return {
+            skuId: String(item.skuId ?? ''),
+            quantity: Math.max(1, Math.round(Number(item.recommendedQuantity) || 1)),
+            unitPrice,
+          };
+        })
+        .filter((line) => line.skuId && line.unitPrice > 0);
+      if (lineItems.length === 0) continue;
+
+      try {
+        const po = await this.purchaseOrdersService.create(tenantId, {
+          vendorId,
+          warehouseId,
+          lineItems,
+          createdBy: reviewedBy,
+          approvalRequestId: approval.id,
+          negotiationRunId: approval.agentRunId,
+          status: 'pending_approval',
+        });
+        createdPoIds.push(po.id);
+        this.logger.log(
+          `Negotiation ${approval.id} finalized into PO ${po.id} at ${finalDiscount}% discount (warehouse ${warehouseId}).`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Failed to create negotiated PO for approval ${approval.id}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    this.eventEmitter.emit(
+      RagEvents.NEGOTIATION_APPROVED,
+      {
+        tenantId,
+        approvalId: approval.id,
+        vendorId,
+        agentRunId: approval.agentRunId,
+        reasoning: approval.reasoning ?? '',
+        payload: { ...payload, finalDiscountPercent: finalDiscount },
+      } satisfies NegotiationApprovedEvent,
+    );
+
+    return createdPoIds;
+  }
+
   async reject(
     tenantId: string,
     id: string,
@@ -243,6 +342,7 @@ export class ApprovalQueueService {
       skuIds,
       vendorId,
       contextRunId: approval.agentRunId,
+      negotiationItems: items,
     });
     const negRunId = (runResult as any).data?.id ?? (runResult as any).id;
     await this.agentRunService.enqueue(tenantId, negRunId, 'negotiation');

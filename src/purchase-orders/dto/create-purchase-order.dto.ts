@@ -51,6 +51,10 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   approvalRequestId?: string;
 
+  @IsUUID()
+  @IsOptional()
+  negotiationRunId?: string;
+
   @IsOptional()
   @IsIn(['draft', 'pending_approval', 'approved'])
   status?: string;
