@@ -1,208 +1,183 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
 import { Mastra } from '@mastra/core';
 import { Agent } from '@mastra/core/agent';
 import { createTool } from '@mastra/core/tools';
-import { anthropic } from '@ai-sdk/anthropic';
 import { z } from 'zod';
-import { StockMovement } from '../inventory/stock-movements/entities/stock-movement.entity';
-import { StockLevel } from '../inventory/stock-levels/entities/stock-level.entity';
-import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
-import { AnomalyFlag } from './entities/anomaly-flag.entity';
-import { ApprovalRequest } from './entities/approval-request.entity';
 import { RagService } from '../rag/rag.service';
+import { GatewayLanguageModelAdapter } from './gateway-language-model.adapter';
+import { ToolExecutorService } from './tool-executor.service';
+
+export type AgentName = 'anomaly' | 'forecasting' | 'reorder' | 'negotiation';
+
+type AgentSet = Record<AgentName, Agent>;
 
 @Injectable()
 export class MastraService {
-  private mastra: Mastra | null = null;
   private readonly logger = new Logger(MastraService.name);
-  
-  public anomalyAgent: Agent | null = null;
-  public forecastingAgent: Agent | null = null;
-  public reorderAgent: Agent | null = null;
-  public negotiationAgent: Agent | null = null;
+  private readonly modelAdapter: GatewayLanguageModelAdapter;
+  private readonly tenantAgents = new Map<string, AgentSet>();
+  private readonly mastra = new Mastra({ agents: {} });
 
   constructor(
     private readonly config: ConfigService,
-    private readonly dataSource: DataSource,
     private readonly ragService: RagService,
+    private readonly toolExecutor: ToolExecutorService,
   ) {
-    this.initializeMastra();
+    this.modelAdapter = new GatewayLanguageModelAdapter(config);
+    this.logger.log('Mastra framework initialized over the ITI gateway.');
   }
 
-  private initializeMastra() {
-    const apiKey = this.config.get<string>('ANTHROPIC_API_KEY');
-    if (!apiKey) {
-      this.logger.warn('ANTHROPIC_API_KEY is not set. Mastra agents will be unavailable.');
-      return;
-    }
+  /** Build (and cache) the 4 agents for one tenant, tools closed over tenantId. */
+  private getAgents(tenantId: string): AgentSet {
+    const cached = this.tenantAgents.get(tenantId);
+    if (cached) return cached;
 
-    // 1. Define Tools
-    const fetchRecentMovementsTool = createTool({
-      id: 'fetchRecentMovements',
-      description: 'Fetch the last 7 days of stock movements across all SKUs.',
-      inputSchema: z.object({}),
-      execute: async () => {
-        const repo = this.dataSource.getRepository(StockMovement);
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        
-        return await repo.createQueryBuilder('m')
-          .where('m.createdAt >= :date', { date: sevenDaysAgo })
-          .orderBy('m.createdAt', 'DESC')
-          .getMany();
-      }
-    });
+    const exec = (name: string) => (input: Record<string, unknown>) =>
+      this.toolExecutor.execute(tenantId, name, input);
 
-    const createAnomalyFlagTool = createTool({
-      id: 'createAnomalyFlag',
-      description: 'Create an anomaly flag for human review when suspicious stock movements are found.',
-      inputSchema: z.object({
-        skuId: z.string().uuid(),
-        description: z.string(),
+    const agents: AgentSet = {
+      anomaly: new Agent({
+        name: 'Anomaly Agent',
+        id: 'anomaly-agent',
+        instructions:
+          'You are an inventory fraud and anomaly detection assistant. Scan recent stock movements and levels for suspicious activity (unexpected drops, abnormal order quantities, negative adjustments without sales). Use the provided tools to gather real data, then report findings concisely with the actual SKU, date, movement type, and quantity. Do not invent events.',
+        model: this.modelAdapter.toLanguageModel(),
+        tools: {
+          get_low_stock_skus: createTool({
+            id: 'get_low_stock_skus',
+            description: 'Get all SKUs that are below or at their reorder threshold across all warehouses',
+            inputSchema: z.object({}),
+            execute: async () => exec('get_low_stock_skus')({}),
+          }),
+          get_movement_history: createTool({
+            id: 'get_movement_history',
+            description: 'Get recent stock movement history for a SKU',
+            inputSchema: z.object({ skuId: z.string().describe('The SKU UUID') }),
+            execute: async (input) => exec('get_movement_history')(input as Record<string, unknown>),
+          }),
+          get_sku: createTool({
+            id: 'get_sku',
+            description: 'Get a SKU by its ID including current quantity and reorder threshold',
+            inputSchema: z.object({ skuId: z.string().describe('The SKU UUID') }),
+            execute: async (input) => exec('get_sku')(input as Record<string, unknown>),
+          }),
+        },
       }),
-      execute: async ({ context }) => {
-        const repo = this.dataSource.getRepository(AnomalyFlag);
-        const flag = repo.create({
-          skuId: context.skuId,
-          description: context.description,
-          status: 'flagged',
-        });
-        return await repo.save(flag);
-      }
-    });
 
-    const fetchStockHistoryTool = createTool({
-      id: 'fetchStockHistory',
-      description: 'Fetch historical stock movements for specific SKUs to project demand.',
-      inputSchema: z.object({
-        skuIds: z.array(z.string().uuid()),
-        days: z.number().default(30),
+      forecasting: new Agent({
+        name: 'Forecasting Agent',
+        id: 'forecasting-agent',
+        instructions:
+          'You are a demand forecasting assistant. Analyze the historical stock movements of each SKU using the provided tools and project future demand. Base projections only on supplied movements; state the observed trend and your projected next-period demand per SKU concisely.',
+        model: this.modelAdapter.toLanguageModel(),
+        tools: {
+          get_movement_history: createTool({
+            id: 'get_movement_history',
+            description: 'Get recent stock movement history for a SKU',
+            inputSchema: z.object({ skuId: z.string().describe('The SKU UUID') }),
+            execute: async (input) => exec('get_movement_history')(input as Record<string, unknown>),
+          }),
+          get_sku: createTool({
+            id: 'get_sku',
+            description: 'Get a SKU by its ID including current quantity and reorder threshold',
+            inputSchema: z.object({ skuId: z.string().describe('The SKU UUID') }),
+            execute: async (input) => exec('get_sku')(input as Record<string, unknown>),
+          }),
+        },
       }),
-      execute: async ({ context }) => {
-        const repo = this.dataSource.getRepository(StockMovement);
-        const date = new Date();
-        date.setDate(date.getDate() - context.days);
-        
-        return await repo.createQueryBuilder('m')
-          .where('m.skuId IN (:...skuIds)', { skuIds: context.skuIds })
-          .andWhere('m.createdAt >= :date', { date })
-          .orderBy('m.createdAt', 'ASC')
-          .getMany();
-      }
-    });
 
-    const checkStockLevelsTool = createTool({
-      id: 'checkStockLevels',
-      description: 'Check if stock levels for SKUs are below the reorder threshold.',
-      inputSchema: z.object({
-        skuIds: z.array(z.string().uuid()),
+      reorder: new Agent({
+        name: 'Reorder Agent',
+        id: 'reorder-agent',
+        instructions:
+          'You are a purchasing / replenishment agent for an inventory management system. You receive JSON items at or below their reorder threshold. For each item use the get_vendors_for_sku tool to retrieve the REAL vendor catalog entries (price and lead time), pick a vendor for each item, use the ACTUAL catalog unitPrice, prefer the cheapest unitPrice or best lead time, and never invent a unitPrice absent from the catalog. Respond with ONLY a valid JSON object matching this schema, no markdown fences, no other text: {"reasoning": string, "confidenceScore": number 0-100, "paymentTerms": string, "items": [{"skuId": string, "sku": string, "productName": string, "warehouse": string, "vendorId": string, "vendorName": string, "unitPrice": number, "currentQuantity": number, "reorderThreshold": number, "recommendedQuantity": number, "lineTotal": number}]}.',
+        model: this.modelAdapter.toLanguageModel(),
+        tools: {
+          get_vendors_for_sku: createTool({
+            id: 'get_vendors_for_sku',
+            description: 'Get all vendors that supply a given SKU, sorted by price ascending',
+            inputSchema: z.object({ skuId: z.string().describe('The SKU UUID') }),
+            execute: async (input) => exec('get_vendors_for_sku')(input as Record<string, unknown>),
+          }),
+          get_vendor_catalog_entry: createTool({
+            id: 'get_vendor_catalog_entry',
+            description: 'Get pricing and lead time for a specific vendor-SKU combination',
+            inputSchema: z.object({
+              vendorId: z.string().describe('The vendor UUID'),
+              skuId: z.string().describe('The SKU UUID'),
+            }),
+            execute: async (input) => exec('get_vendor_catalog_entry')(input as Record<string, unknown>),
+          }),
+          get_low_stock_skus: createTool({
+            id: 'get_low_stock_skus',
+            description: 'Get all SKUs that are below or at their reorder threshold across all warehouses',
+            inputSchema: z.object({}),
+            execute: async () => exec('get_low_stock_skus')({}),
+          }),
+        },
       }),
-      execute: async ({ context }) => {
-        const repo = this.dataSource.getRepository(StockLevel);
-        return await repo.createQueryBuilder('sl')
-          .where('sl.skuId IN (:...skuIds)', { skuIds: context.skuIds })
-          .getMany();
-      }
-    });
 
-    const searchKnowledgeBaseTool = createTool({
-      id: 'searchKnowledgeBase',
-      description: 'Search the vendor knowledge base (contracts, pricing catalogs, transcripts) for context before negotiating.',
-      inputSchema: z.object({
-        query: z.string(),
-        vendorId: z.string().uuid().optional(),
+      negotiation: new Agent({
+        name: 'Vendor Negotiation Agent',
+        id: 'negotiation-agent',
+        instructions:
+          'You are a vendor negotiation assistant. First use searchKnowledgeBase to find relevant past terms, pricing, or contract clauses for the given vendor. Then draft a professional email asking for a discount, better pricing, or improved payment terms. Do not invent facts not present in the knowledge base. Respond with ONLY a valid JSON object, no markdown fences, no other text, matching this schema: {"subject": string, "emailContent": string, "requestedDiscountPercent": number, "confidenceScore": number 0-100, "reasoning": string}.',
+        model: this.modelAdapter.toLanguageModel(),
+        tools: {
+          searchKnowledgeBase: createTool({
+            id: 'searchKnowledgeBase',
+            description: 'Search the vendor knowledge base (contracts, pricing catalogs, transcripts) for context before negotiating',
+            inputSchema: z.object({
+              query: z.string(),
+              vendorId: z.string().uuid().optional(),
+            }),
+            execute: async (input) => {
+              const { query, vendorId } = input as { query: string; vendorId?: string };
+              return this.ragService.search(query, vendorId ? { vendorId } : {}, 5);
+            },
+          }),
+          get_vendor: createTool({
+            id: 'get_vendor',
+            description: 'Get a vendor by its ID',
+            inputSchema: z.object({ vendorId: z.string().describe('The vendor UUID') }),
+            execute: async (input) => exec('get_vendor')(input as Record<string, unknown>),
+          }),
+        },
       }),
-      execute: async ({ context }) => {
-        const filters = context.vendorId ? { vendorId: context.vendorId } : {};
-        const results = await this.ragService.search(context.query, filters, 5);
-        return results;
-      }
-    });
+    };
 
-    const draftNegotiationProposalTool = createTool({
-      id: 'draftNegotiationProposal',
-      description: 'Draft a negotiation email to a vendor and submit it for human approval.',
-      inputSchema: z.object({
-        vendorId: z.string().uuid(),
-        agentRunId: z.string().uuid(),
-        tenantId: z.string().uuid(),
-        emailContent: z.string(),
-        reasoning: z.string(),
-      }),
-      execute: async ({ context }) => {
-        const repo = this.dataSource.getRepository(ApprovalRequest);
-        const approval = repo.create({
-          tenantId: context.tenantId,
-          agentRunId: context.agentRunId,
-          agentType: 'negotiation',
-          stepNumber: 1,
-          payload: { emailContent: context.emailContent, vendorId: context.vendorId },
-          reasoning: context.reasoning,
-          status: 'pending',
-        });
-        return await repo.save(approval);
-      }
-    });
+    this.tenantAgents.set(tenantId, agents);
+    return agents;
+  }
 
-    // 2. Define Agents
-    this.anomalyAgent = new Agent({
-      name: 'Anomaly Agent',
-      id: 'anomaly-agent',
-      instructions: 'You are an inventory fraud and anomaly detection assistant. Scan recent movements for suspicious activity (like negative adjustments without sales). If you find any, use the createAnomalyFlag tool.',
-      model: anthropic('claude-sonnet-4-6'),
-      tools: {
-        fetchRecentMovements: fetchRecentMovementsTool,
-        createAnomalyFlag: createAnomalyFlagTool,
-      }
-    });
-
-    this.forecastingAgent = new Agent({
-      name: 'Forecasting Agent',
-      id: 'forecasting-agent',
-      instructions: 'You are a demand forecasting assistant. Analyze historical stock movements to project future demand. Provide clear reasoning.',
-      model: anthropic('claude-sonnet-4-6'),
-      tools: {
-        fetchStockHistory: fetchStockHistoryTool,
-      }
-    });
-
-    this.reorderAgent = new Agent({
-      name: 'Reorder Agent',
-      id: 'reorder-agent',
-      instructions: 'You are a restocking assistant. Check stock levels for the provided SKUs. If they are low, prepare to draft a Purchase Order.',
-      model: anthropic('claude-sonnet-4-6'),
-      tools: {
-        checkStockLevels: checkStockLevelsTool,
-      }
-    });
-
-    this.negotiationAgent = new Agent({
-      name: 'Vendor Negotiation Agent',
-      id: 'negotiation-agent',
-      instructions: 'You are a vendor negotiation assistant. First, use searchKnowledgeBase to find relevant past terms, pricing, or contract clauses for the given vendor. Then, formulate a strategy and use draftNegotiationProposal to prepare a professional email asking for better pricing, bulk discounts, or improved payment terms. Do not hallucinate terms; rely only on the retrieved knowledge base data.',
-      model: anthropic('claude-sonnet-4-6'),
-      tools: {
-        searchKnowledgeBase: searchKnowledgeBaseTool,
-        draftNegotiationProposal: draftNegotiationProposalTool,
-      }
-    });
-
-    // 3. Initialize Mastra
-    this.mastra = new Mastra({
-      agents: {
-        anomaly: this.anomalyAgent,
-        forecasting: this.forecastingAgent,
-        reorder: this.reorderAgent,
-        negotiation: this.negotiationAgent,
+  /**
+   * Run a named agent for a tenant. Tools are tenant-scoped; the user message
+   * carries the run context. Returns the final agent text (or structured JSON)
+   * plus any tool calls executed during the run.
+   */
+  async runAgent(
+    agentName: AgentName,
+    tenantId: string,
+    input: string,
+    options: { runId?: string; maxSteps?: number } = {},
+  ): Promise<{ text: string; toolCalls?: unknown[] }> {
+    const agent = this.getAgents(tenantId)[agentName];
+    const result = await agent.generate(
+      [{ role: 'user', content: input }],
+      {
+        runId: options.runId,
+        maxSteps: options.maxSteps ?? 6,
       },
-    });
-    
-    this.logger.log('Mastra framework initialized with 3 agents.');
+    );
+
+    return {
+      text: typeof result.text === 'string' ? result.text : JSON.stringify(result),
+      toolCalls: (result as { toolResults?: unknown[] }).toolResults,
+    };
   }
 
-  getMastra(): Mastra | null {
+  getMastra(): Mastra {
     return this.mastra;
   }
 }

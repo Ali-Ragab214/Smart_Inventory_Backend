@@ -3,7 +3,7 @@ import { PaginationQueryDto } from '../../utils/query.dto';
 
 export class ApprovalQueryDto extends PaginationQueryDto {
   @IsOptional()
-  @IsIn(['pending', 'approved', 'rejected'])
+  @IsIn(['pending', 'approved', 'rejected', 'deferred'])
   status?: string;
 
   @IsOptional()

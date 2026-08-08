@@ -28,6 +28,7 @@ export type AgentRunRelatedInput = {
   skuIds?: string[];
   vendorId?: string;
   poId?: string;
+  contextRunId?: string;
 };
 
 const VALID_AGENT_TYPES: AgentType[] = [
@@ -70,6 +71,7 @@ export class AgentRunService {
       skus: related.skuIds?.map(id => ({ id } as any)) ?? [],
       relatedVendorId: related.vendorId ?? null,
       relatedPoId: related.poId ?? null,
+      contextRunId: related.contextRunId ?? null,
     });
 
     const saved = await this.runRepository.save(run);

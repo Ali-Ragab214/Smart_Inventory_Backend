@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -206,6 +206,49 @@ export class ApprovalQueueService {
     approval.reviewedAt = new Date();
     const saved = await this.approvalRepo.save(approval);
     await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'rejected');
+    return this.mapper.toResponse(saved);
+  }
+
+  async negotiate(
+    tenantId: string,
+    id: string,
+    reviewedBy: string,
+  ): Promise<ApprovalRequestResponseDto> {
+    const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
+    if (!approval) {
+      throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
+    }
+    if (approval.status !== 'pending') {
+      throw new BadRequestException({ message: 'Only pending approval requests can be sent to negotiation.', code: 'APPROVAL_NOT_PENDING' });
+    }
+    if (approval.agentType !== 'reorder') {
+      throw new BadRequestException({ message: 'Negotiation handoff is only available for reorder proposals.', code: 'NEGOTIATION_NOT_ALLOWED' });
+    }
+
+    approval.status = 'deferred';
+    approval.reviewedBy = reviewedBy;
+    approval.reviewedAt = new Date();
+    const saved = await this.approvalRepo.save(approval);
+    await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'escalated');
+
+    const payload = (approval.payload ?? {}) as Record<string, unknown>;
+    const items = Array.isArray(payload.items)
+      ? (payload.items as Array<Record<string, unknown>>)
+      : [];
+    const skuIds = [...new Set(items.map((item) => String(item.skuId ?? '')).filter(Boolean))];
+    const vendorId = (payload.vendorId as string | undefined) ?? undefined;
+
+    const runResult = await this.agentRunService.start(tenantId, 'negotiation', {
+      skuIds,
+      vendorId,
+      contextRunId: approval.agentRunId,
+    });
+    const negRunId = (runResult as any).data?.id ?? (runResult as any).id;
+    await this.agentRunService.enqueue(tenantId, negRunId, 'negotiation');
+    this.logger.log(
+      `Approval ${approval.id} deferred to negotiation run ${negRunId} (${skuIds.length} SKU(s)).`,
+    );
+
     return this.mapper.toResponse(saved);
   }
 }

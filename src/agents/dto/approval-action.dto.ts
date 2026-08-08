@@ -19,3 +19,9 @@ export class RejectApprovalRequestDto {
   @IsUUID()
   reviewedBy!: string;
 }
+
+export class NegotiateApprovalRequestDto {
+  @ApiProperty()
+  @IsUUID()
+  reviewedBy!: string;
+}

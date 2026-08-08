@@ -20,7 +20,7 @@ import {
 import { ApprovalQueueService } from './approval-queue.service';
 import { paginatedResponse, successResponse } from '../utils/response.util';
 import { ApprovalQueryDto } from './dto/approval-query.dto';
-import { ApproveApprovalRequestDto, RejectApprovalRequestDto } from './dto/approval-action.dto';
+import { ApproveApprovalRequestDto, NegotiateApprovalRequestDto, RejectApprovalRequestDto } from './dto/approval-action.dto';
 import { ApprovalRequestResponseDto } from './dto/approval-request-response.dto';
 import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
@@ -66,6 +66,21 @@ export class ApprovalQueueController {
     @CurrentUser() user: UserResponseDto,
   ) {
     const data = await this.service.reject(user.tenantId!, id, body.reviewedBy);
+    return successResponse(data);
+  }
+
+  @Post(':id/negotiate')
+  @ApiOperation({ summary: 'Defer a reorder approval to the negotiation agent' })
+  @ApiParam({ name: 'id', description: 'Approval request UUID' })
+  @ApiBody({ type: NegotiateApprovalRequestDto })
+  @ApiCreatedResponse({ type: ApprovalRequestResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid request body' })
+  async negotiate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: NegotiateApprovalRequestDto,
+    @CurrentUser() user: UserResponseDto,
+  ) {
+    const data = await this.service.negotiate(user.tenantId!, id, body.reviewedBy);
     return successResponse(data);
   }
 }

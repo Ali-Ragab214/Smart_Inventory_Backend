@@ -23,7 +23,7 @@ export class ApprovalRequest extends AbstractTenantEntity {
 
   @Column({
     type: 'enum',
-    enum: ['pending', 'approved', 'rejected'],
+    enum: ['pending', 'approved', 'rejected', 'deferred'],
     default: 'pending',
   })
   status!: string;
