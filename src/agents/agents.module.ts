@@ -30,17 +30,23 @@ import { NegotiationStateMachineService } from './negotiation-state-machine.serv
 import { VendorNegotiationProfile } from './entities/vendor-negotiation-profile.entity';
 import { RagModule } from '../rag/rag.module';
 import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module';
+import { ForecastsModule } from '../forecasts/forecasts.module';
+import { ForecastSchedulerService } from '../forecasts/forecast-scheduler.service';
+import { ForecastController } from '../forecasts/forecast.controller';
+import { Sku } from '../sku/entities/sku.entity';
+import { StockMovement } from '../inventory/stock-movements/entities/stock-movement.entity';
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AgentRun, AgentStep, ApprovalRequest, AnomalyFlag, User, VendorNegotiationProfile]),
+    TypeOrmModule.forFeature([AgentRun, AgentStep, ApprovalRequest, AnomalyFlag, User, VendorNegotiationProfile, Sku, StockMovement]),
     BullModule.registerQueue({ name: 'agent-jobs' }),
     SkuModule,
     InventoryModule,
     VendorsModule,
     RagModule,
     PurchaseOrdersModule,
+    ForecastsModule,
   ],
-  controllers: [ApprovalQueueController, AgentRunController, AnomalyFlagsController],
+  controllers: [ApprovalQueueController, AgentRunController, AnomalyFlagsController, ForecastController],
   providers: [
     LLMService,
     AnomalyFlagsService,
@@ -57,6 +63,7 @@ import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module'
     AgentSchedulerService,
     SimulatedVendorService,
     NegotiationStateMachineService,
+    ForecastSchedulerService,
   ],
   exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MastraService, GatewayLlmService, SimulatedVendorService],
 })

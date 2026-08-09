@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { BullModule } from "@nestjs/bullmq";
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { SkuModule } from './sku/sku.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
@@ -18,6 +19,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { RagModule } from './rag/rag.module';
 import { TenantsModule } from './tenants/tenants.module';
+import { ForecastsModule } from './forecasts/forecasts.module';
 
 @Module({
   imports: [
@@ -26,6 +28,7 @@ import { TenantsModule } from './tenants/tenants.module';
     }),
 
     EventEmitterModule.forRoot(),
+    ScheduleModule.forRoot(),
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -66,6 +69,7 @@ import { TenantsModule } from './tenants/tenants.module';
     UploadsModule,
     RagModule,
     TenantsModule,
+    ForecastsModule,
   ],
 })
 export class AppModule {}

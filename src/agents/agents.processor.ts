@@ -11,7 +11,8 @@ import { Sku } from '../sku/entities/sku.entity';
 import { ToolExecutorService } from './tool-executor.service';
 import { InventoryService } from './inventory.service';
 import { MastraService, AgentName } from './mastra.service';
-import { ReorderDecisionSchema, NegotiationDecisionSchema } from './agent-ai.schemas';
+import { ReorderDecisionSchema, NegotiationDecisionSchema, ForecastDecisionSchema } from './agent-ai.schemas';
+import { ForecastService } from '../forecasts/forecast.service';
 
 type AgentJobData = {
   runId: string;
@@ -36,6 +37,7 @@ export class AgentsProcessor extends WorkerHost {
     private readonly dataSource: DataSource,
     private readonly toolExecutor: ToolExecutorService,
     private readonly inventoryService: InventoryService,
+    private readonly forecastService: ForecastService,
   ) {
     super();
   }
@@ -359,8 +361,8 @@ export class AgentsProcessor extends WorkerHost {
           movementCount: history.length,
           movements: history.slice(0, 30).map((m: any) => ({
             date: m.createdAt ?? m.date ?? null,
-            type: m.type ?? m.movementType ?? null,
-            quantity: m.quantity ?? null,
+            type: m.reason ?? m.movementType ?? null,
+            quantityChange: Number(m.quantityChange ?? m.quantity ?? 0),
             reference: m.reference ?? null,
             note: m.note ?? null,
           })),
@@ -401,6 +403,10 @@ export class AgentsProcessor extends WorkerHost {
     );
     const raw = result.text;
 
+    if (agentType === 'forecasting') {
+      await this.persistForecast(tenantId, run, stockContext, raw);
+    }
+
     await this.agentRunService.appendStep(
       tenantId,
       runId,
@@ -416,6 +422,64 @@ export class AgentsProcessor extends WorkerHost {
       .replace(/```(?:json)?\s*/gi, '')
       .replace(/```\s*$/g, '')
       .trim();
+  }
+
+  /**
+   * Persist a forecasting outcome for the run's (single) SKU: LLM decision
+   * when parseable, otherwise a statistical moving-average fallback.
+   */
+  private async persistForecast(
+    tenantId: string,
+    run: any,
+    stockContext: Array<Record<string, unknown>>,
+    raw: string,
+  ): Promise<void> {
+    const skuId: string | undefined = (run.skuIds ?? [])[0];
+    if (!skuId) return;
+
+    try {
+      const result = JSON.parse(this.stripFences(raw)) as Record<string, unknown>;
+      const parsed = ForecastDecisionSchema.parse(result);
+      await this.forecastService.record(tenantId, skuId, {
+        projectedDemand: parsed.projectedDemand,
+        confidenceScore: parsed.confidenceScore,
+        period: parsed.period,
+        reasoning: {
+          llm: true,
+          rawReasoning: parsed.reasoning,
+          source: 'mastra_forecasting_agent',
+        },
+        model: 'llm',
+      });
+      return;
+    } catch {
+      // fall through to statistical fallback
+    }
+
+    try {
+      const first = stockContext[0] as any;
+      const movements: Array<Record<string, unknown>> = first?.movements ?? [];
+      const daily = new Map<string, number>();
+      for (const m of movements) {
+        const rawDate = m.date as string | undefined;
+        if (!rawDate) continue;
+        const day = String(rawDate).slice(0, 10);
+        const change = Number(m.quantityChange ?? 0);
+        daily.set(day, (daily.get(day) ?? 0) + Math.max(0, -change || 0));
+      }
+      const series = [...daily.values()].slice(-90);
+      if (series.length === 0) {
+        this.logger.warn(`No movement series for SKU ${skuId} — skipping statistical forecast.`);
+        return;
+      }
+      await this.forecastService.recordStatisticalFallback(
+        tenantId,
+        skuId,
+        series,
+      );
+    } catch (err) {
+      this.logger.warn(`Statistical forecast failed for SKU ${skuId}: ${(err as Error).message}`);
+    }
   }
 
   private async resolveVendorId(run: any): Promise<string | null> {
