@@ -22,14 +22,6 @@ export class AgentSchedulerService {
       await this.agentRunService.enqueue(event.tenantId, reorderRunId, 'reorder');
       this.logger.log(`[Organic Trigger] Reorder agent queued for runId ${reorderRunId}`);
 
-      // Trigger Negotiation Agent
-      const negResult = await this.agentRunService.start(event.tenantId, 'negotiation', {
-        skuIds: [event.payload.skuId],
-      });
-      const negRunId = (negResult as any).data?.id ?? (negResult as any).id;
-      await this.agentRunService.enqueue(event.tenantId, negRunId, 'negotiation');
-      this.logger.log(`[Organic Trigger] Negotiation agent queued for runId ${negRunId}`);
-
     } catch (error) {
       this.logger.error(`[Organic Trigger] Failed to trigger agents organically`, error);
     }

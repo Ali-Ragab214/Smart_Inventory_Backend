@@ -219,12 +219,27 @@ export class ApprovalQueueService {
       return createdPoIds;
     }
 
-    const run = (await this.agentRunService.load(tenantId, approval.agentRunId) as any)?.data
-      ?.run as any;
-    const items: Array<Record<string, unknown>> =
+    const run = await this.agentRunService.loadEntity(tenantId, approval.agentRunId);
+    let items: Array<Record<string, unknown>> =
       (run?.negotiationItems as Array<Record<string, unknown>> | undefined) ??
       (Array.isArray(payload.items) ? (payload.items as Array<Record<string, unknown>>) : []) ??
       [];
+
+    // Fallback: load items from the original reorder approval via contextRunId
+    if (items.length === 0 && run?.contextRunId) {
+      const originalApproval = await this.approvalRepo.findOne({
+        where: { agentRunId: run.contextRunId, tenantId },
+      });
+      if (originalApproval) {
+        const originalPayload = (originalApproval.payload ?? {}) as Record<string, unknown>;
+        items = Array.isArray(originalPayload.items)
+          ? (originalPayload.items as Array<Record<string, unknown>>)
+          : [];
+        if (items.length > 0) {
+          this.logger.log(`Loaded ${items.length} items from original reorder approval ${originalApproval.id} for negotiation PO.`);
+        }
+      }
+    }
 
     if (items.length === 0) {
       this.logger.warn(`Cannot create negotiated PO for approval ${approval.id}: no items.`);

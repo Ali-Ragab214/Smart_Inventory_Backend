@@ -185,6 +185,10 @@ export class AgentRunService {
     return successResponse(this.mapper.toRunResponse(saved));
   }
 
+  async loadEntity(tenantId: string, runId: string): Promise<AgentRun | null> {
+    return this.runRepository.findOne({ where: { id: runId, tenantId } });
+  }
+
   async findRecent(tenantId: string, limit = 20) {
     const runs = await this.runRepository.find({
       where: { tenantId },
