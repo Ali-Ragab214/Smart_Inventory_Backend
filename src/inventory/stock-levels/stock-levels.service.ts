@@ -5,10 +5,26 @@ import { StockLevel } from './entities/stock-level.entity';
 import { Sku } from '../../sku/entities/sku.entity';
 import { Warehouse } from '../../warehouses/entities/warehouse.entity';
 import { User, UserRole } from '../../users/entities/user.entity';
+import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
 import { UpdateStockLevelDto } from './dto/update-stock-level.dto';
 import { StockLevelResponseDto } from './dto/stock-level-response.dto';
 import { paginate } from '../../utils/pagination.util';
+
+export interface WarehouseMetrics {
+  warehouseId: string;
+  units: number;
+  stockValue: number;
+  targetValue: number;
+  coveragePct: number;
+  skuCount: number;
+  lowStockCount: number;
+  capacityUnits: number | null;
+  openOrderCount: number;
+  staffCount: number;
+}
+
+const OPEN_PO_STATUSES = ['draft', 'pending_approval', 'approved', 'sent'];
 
 @Injectable()
 export class StockLevelsService {
@@ -19,6 +35,10 @@ export class StockLevelsService {
     private readonly skuRepo: Repository<Sku>,
     @InjectRepository(Warehouse)
     private readonly warehouseRepo: Repository<Warehouse>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
+    @InjectRepository(PurchaseOrder)
+    private readonly poRepo: Repository<PurchaseOrder>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -98,7 +118,7 @@ export class StockLevelsService {
       .orderBy('sl.quantity', 'ASC');
 
     if (user.role === UserRole.TENANT_OWNER) {
-      qb.andWhere('warehouse.tenantId = :userId', { userId: user.id });
+      qb.andWhere('warehouse.tenantId = :tenantId', { tenantId: user.tenantId });
     } else if (
       user.role === UserRole.WAREHOUSE_MANAGER ||
       user.role === UserRole.INVENTORY_CLERK
@@ -115,6 +135,96 @@ export class StockLevelsService {
 
     const levels = await qb.getMany();
     return levels.map((sl) => this.toResponse(sl));
+  }
+
+  async getWarehouseMetrics(warehouseIds: string[], tenantId?: string): Promise<WarehouseMetrics[]> {
+    const scoped = warehouseIds.length > 0;
+    const idScope = scoped ? { warehouseId: In(warehouseIds) } : { tenantId };
+    const whScope = scoped ? { id: In(warehouseIds) } : { tenantId };
+
+    const levels = await this.stockLevelRepo.find({
+      where: idScope as any,
+      relations: ['sku', 'warehouse'],
+    });
+
+    const map = new Map<string, WarehouseMetrics>();
+    const seed = (warehouseId: string): WarehouseMetrics => {
+      let m = map.get(warehouseId);
+      if (!m) {
+        m = {
+          warehouseId,
+          units: 0,
+          stockValue: 0,
+          targetValue: 0,
+          coveragePct: 0,
+          skuCount: 0,
+          lowStockCount: 0,
+          capacityUnits: null,
+          openOrderCount: 0,
+          staffCount: 0,
+        };
+        map.set(warehouseId, m);
+      }
+      return m;
+    };
+
+    for (const sl of levels) {
+      const price = sl.sku?.price ?? 0;
+      const m = seed(sl.warehouseId);
+      m.units += sl.quantity;
+      m.stockValue += sl.quantity * price;
+      m.targetValue += (sl.reorderThreshold + (sl.safetyStock ?? 0)) * price;
+      m.skuCount += 1;
+      if (sl.quantity <= sl.reorderThreshold) {
+        m.lowStockCount += 1;
+      }
+    }
+
+    const staffQb = this.userRepo
+      .createQueryBuilder('u')
+      .select('u."warehouse_id"', 'warehouseId')
+      .addSelect('COUNT(*)::int', 'count')
+      .andWhere('u."is_active" = true')
+      .groupBy('u."warehouse_id"');
+    if (scoped) {
+      staffQb.where('u."warehouse_id" IN (:...warehouseIds)', { warehouseIds });
+    } else {
+      staffQb.where('u."tenant_id" = :tenantId', { tenantId });
+    }
+    for (const row of await staffQb.getRawMany()) {
+      const m = row.warehouseId ? map.get(row.warehouseId) : undefined;
+      if (m) m.staffCount = Number(row.count) || 0;
+    }
+
+    const poQb = this.poRepo
+      .createQueryBuilder('po')
+      .select('po."warehouse_id"', 'warehouseId')
+      .addSelect('COUNT(*)::int', 'count')
+      .andWhere('po.status IN (:...statuses)', { statuses: OPEN_PO_STATUSES })
+      .groupBy('po."warehouse_id"');
+    if (scoped) {
+      poQb.where('po."warehouse_id" IN (:...warehouseIds)', { warehouseIds });
+    } else {
+      poQb.where('po."tenant_id" = :tenantId', { tenantId });
+    }
+    for (const row of await poQb.getRawMany()) {
+      const m = row.warehouseId ? map.get(row.warehouseId) : undefined;
+      if (m) m.openOrderCount = Number(row.count) || 0;
+    }
+
+    const warehouses = await this.warehouseRepo.find({
+      where: whScope as any,
+      select: ['id', 'capacityUnits'],
+    });
+    for (const wh of warehouses) {
+      seed(wh.id).capacityUnits = wh.capacityUnits ?? null;
+    }
+
+    const list = [...map.values()];
+    for (const m of list) {
+      m.coveragePct = m.targetValue > 0 ? Math.round((m.stockValue / m.targetValue) * 100) : m.units > 0 ? 100 : 0;
+    }
+    return list;
   }
 
   async findOne(tenantId: string, id: string): Promise<StockLevelResponseDto> {

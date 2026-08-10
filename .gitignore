@@ -3,6 +3,11 @@ dist/
 .env
 coverage/
 *.log
+*.log.*
+backend-dev.log.err
+test.js
+test2.js
+create-dynamic-stripe.js
 StockSavvy.postman_collection.json
 docs/
 *.md

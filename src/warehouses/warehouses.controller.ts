@@ -26,6 +26,7 @@ import { WarehousesService } from './warehouses.service';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { WarehouseResponseDto } from './dto/warehouse-response.dto';
+import { WarehouseSummaryDto } from './dto/warehouse-summary.dto';
 import { successResponse } from '../utils/response.util';
 
 @ApiTags('warehouses')
@@ -47,6 +48,14 @@ export class WarehousesController {
   @ApiOkResponse({ type: WarehouseResponseDto, isArray: true })
   async findAll(@CurrentUser() user: UserResponseDto) {
     const data = await this.warehousesService.findAll(user);
+    return successResponse(data);
+  }
+
+  @Get('summary')
+  @ApiOperation({ summary: 'List all warehouses with live metrics (units, stock value, coverage, staff, open orders)' })
+  @ApiOkResponse({ type: WarehouseSummaryDto, isArray: true })
+  async findAllSummary(@CurrentUser() user: UserResponseDto) {
+    const data = await this.warehousesService.findAllWithMetrics(user);
     return successResponse(data);
   }
 

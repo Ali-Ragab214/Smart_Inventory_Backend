@@ -19,6 +19,9 @@ export class WarehouseResponseDto {
   @ApiProperty()
   isMain!: boolean;
 
+  @ApiProperty({ nullable: true })
+  capacityUnits!: number | null;
+
   @ApiProperty()
   createdAt!: Date;
 

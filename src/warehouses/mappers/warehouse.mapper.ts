@@ -12,6 +12,7 @@ export class WarehouseMapper {
     warehouse.location = dto.location ?? null;
     warehouse.status = dto.status ?? undefined as any;
     warehouse.isMain = dto.isMain ?? false;
+    warehouse.capacityUnits = dto.capacityUnits ?? null;
     if (dto.tenantId) {
       warehouse.tenantId = dto.tenantId;
     }
@@ -26,6 +27,7 @@ export class WarehouseMapper {
     dto.status = entity.status;
     dto.tenantId = entity.tenantId;
     dto.isMain = entity.isMain;
+    dto.capacityUnits = entity.capacityUnits ?? null;
     dto.createdAt = entity.createdAt;
     dto.updatedAt = entity.updatedAt;
     return dto;
@@ -44,6 +46,9 @@ export class WarehouseMapper {
     }
     if (dto.status !== undefined) {
       entity.status = dto.status as any;
+    }
+    if (dto.capacityUnits !== undefined) {
+      entity.capacityUnits = dto.capacityUnits;
     }
     return entity;
   }
