@@ -23,4 +23,17 @@ export class TenantsService {
 
     return this.tenantRepository.save(tenant);
   }
+
+  async findById(id: string): Promise<Tenant> {
+    const tenant = await this.tenantRepository.findOne({ 
+      where: { id },
+      relations: ['plan']
+    });
+    
+    if (!tenant) {
+      throw new NotFoundException({ message: 'The specified tenant could not be found.', code: 'TENANT_NOT_FOUND' });
+    }
+    
+    return tenant;
+  }
 }

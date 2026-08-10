@@ -41,8 +41,8 @@ async function bootstrap() {
 
   console.log('Creating Warehouses...');
   const warehouseRepo = dataSource.getRepository(Warehouse);
-  const w1 = warehouseRepo.create({ name: 'Main Hub', location: '123 Main St', isMain: true, status: WarehouseStatus.ACTIVE, tenantId: tenant.id });
-  const w2 = warehouseRepo.create({ name: 'East Branch', location: '456 East Ave', isMain: false, status: WarehouseStatus.ACTIVE, tenantId: tenant.id });
+  const w1 = warehouseRepo.create({ name: 'Main Hub', location: '123 Main St', isMain: true, status: WarehouseStatus.ACTIVE, tenantId: tenant.id, capacityUnits: 1200 });
+  const w2 = warehouseRepo.create({ name: 'East Branch', location: '456 East Ave', isMain: false, status: WarehouseStatus.ACTIVE, tenantId: tenant.id, capacityUnits: 800 });
   await warehouseRepo.save([w1, w2]);
 
   console.log('Creating Users...');

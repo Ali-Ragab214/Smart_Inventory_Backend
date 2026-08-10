@@ -26,4 +26,7 @@ export class Warehouse extends AbstractTenantEntity {
 
   @Column({ name: 'is_main', type: 'boolean', default: false })
   isMain!: boolean;
+
+  @Column({ name: 'capacity_units', type: 'int', nullable: true })
+  capacityUnits!: number | null;
 }

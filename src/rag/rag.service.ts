@@ -42,9 +42,13 @@ export class RagService implements OnModuleInit {
     await this.dataSource.query(
       'ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS embedding vector(384)',
     );
-    await this.dataSource.query(
-      'CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)',
-    );
+    try {
+      await this.dataSource.query(
+        'CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)',
+      );
+    } catch (e) {
+      this.logger.warn('Index knowledge_chunks_embedding_idx already exists or concurrent creation ignored.');
+    }
 
     // Phase 1 — add entity/tenant scoping columns for event-driven ingestion.
     // These columns let us upsert (replace stale) chunks keyed by source entity

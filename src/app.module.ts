@@ -20,6 +20,8 @@ import { UploadsModule } from './uploads/uploads.module';
 import { RagModule } from './rag/rag.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { ForecastsModule } from './forecasts/forecasts.module';
+import { PlansModule } from './plans/plans.module';
+import { StripeModule } from './stripe/stripe.module';
 
 @Module({
   imports: [
@@ -70,6 +72,8 @@ import { ForecastsModule } from './forecasts/forecasts.module';
     RagModule,
     TenantsModule,
     ForecastsModule,
+    PlansModule,
+    StripeModule,
   ],
 })
 export class AppModule {}

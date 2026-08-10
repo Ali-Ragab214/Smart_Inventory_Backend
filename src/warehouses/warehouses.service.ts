@@ -5,6 +5,7 @@ import { Warehouse } from './entities/warehouse.entity';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { WarehouseResponseDto } from './dto/warehouse-response.dto';
+import { WarehouseSummaryDto } from './dto/warehouse-summary.dto';
 import { WarehouseMapper } from './mappers/warehouse.mapper';
 import { StockLevelsService } from '../inventory/stock-levels/stock-levels.service';
 import { UserResponseDto } from '../users/dto/user-response.dto';
@@ -47,6 +48,30 @@ export class WarehousesService {
   async findAllByTenant(tenantId: string): Promise<WarehouseResponseDto[]> {
     const warehouses = await this.warehouseRepository.find({ where: { tenantId } });
     return this.warehouseMapper.toResponseList(warehouses);
+  }
+
+  async findAllWithMetrics(user: UserResponseDto): Promise<WarehouseSummaryDto[]> {
+    const warehouses = await this.findAll(user);
+    const metrics = await this.stockLevelsService.getWarehouseMetrics(
+      warehouses.map((w) => w.id),
+      user.tenantId ?? undefined,
+    );
+    const metricsByWarehouse = new Map(metrics.map((m) => [m.warehouseId, m]));
+
+    return warehouses.map((w) => {
+      const m = metricsByWarehouse.get(w.id);
+      return {
+        ...w,
+        units: m?.units ?? 0,
+        stockValue: m?.stockValue ?? 0,
+        targetValue: m?.targetValue ?? 0,
+        coveragePct: m?.coveragePct ?? 0,
+        skuCount: m?.skuCount ?? 0,
+        lowStockCount: m?.lowStockCount ?? 0,
+        openOrderCount: m?.openOrderCount ?? 0,
+        staffCount: m?.staffCount ?? 0,
+      };
+    });
   }
 
   async findOne(user: UserResponseDto, id: string): Promise<WarehouseResponseDto> {

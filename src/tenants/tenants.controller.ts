@@ -1,4 +1,4 @@
-import { Body, Controller, Param, ParseUUIDPipe, Patch } from '@nestjs/common';
+import { Body, Controller, Param, ParseUUIDPipe, Patch, Get } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { TenantsService } from './tenants.service';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
@@ -12,6 +12,22 @@ import { successResponse } from '../utils/response.util';
 @Controller('tenants')
 export class TenantsController {
   constructor(private readonly tenantsService: TenantsService) {}
+
+  @Get(':id')
+  @Roles('super_admin', 'tenant_owner')
+  @ApiOperation({ summary: 'Get a tenant by id' })
+  @ApiParam({ name: 'id', description: 'Tenant UUID' })
+  @ApiOkResponse({ description: 'Tenant retrieved successfully' })
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: UserResponseDto
+  ) {
+    if (user.role === 'tenant_owner' && user.tenantId !== id) {
+      throw new Error('Forbidden resource');
+    }
+    const data = await this.tenantsService.findById(id);
+    return successResponse(data);
+  }
 
   @Patch(':id')
   @Roles('super_admin', 'tenant_owner')

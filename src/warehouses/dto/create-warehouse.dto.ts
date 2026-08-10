@@ -2,11 +2,13 @@ import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -41,4 +43,10 @@ export class CreateWarehouseDto {
   @IsBoolean()
   @IsOptional()
   isMain?: boolean;
+
+  @ApiPropertyOptional({ example: 2000, description: 'Total storage capacity in units' })
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  capacityUnits?: number;
 }

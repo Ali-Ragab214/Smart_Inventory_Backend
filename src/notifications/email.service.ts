@@ -115,4 +115,34 @@ export class EmailService {
     `;
     await this.sendToUsers(users, subject, html);
   }
+
+  async sendTrialEndingWarning(
+    users: User[],
+  ): Promise<void> {
+    const subject = 'Your StockSavvy Free Trial is Ending Soon!';
+    const html = `
+      <div style="font-family: sans-serif; padding: 20px;">
+        <h2>Trial Expiring in 3 Days</h2>
+        <p>Your 14-day free trial of StockSavvy will expire in exactly 3 days.</p>
+        <p>To avoid losing access to your inventory data and AI insights, please log in and upgrade your plan.</p>
+        <p style="font-size: 12px; color: #666;">If you have any questions, reply to this email.</p>
+      </div>
+    `;
+    await this.sendToUsers(users, subject, html);
+  }
+
+  async sendTrialExpired(
+    users: User[],
+  ): Promise<void> {
+    const subject = 'Your StockSavvy Trial has Expired';
+    const html = `
+      <div style="font-family: sans-serif; padding: 20px;">
+        <h2>Trial Expired</h2>
+        <p>Your 14-day free trial of StockSavvy has officially expired.</p>
+        <p>Your account is now locked. Don't worry, your data is safe! Simply log into the dashboard and subscribe to a paid plan to regain full access.</p>
+        <p style="font-size: 12px; color: #666;">We hope you enjoyed the trial!</p>
+      </div>
+    `;
+    await this.sendToUsers(users, subject, html);
+  }
 }
