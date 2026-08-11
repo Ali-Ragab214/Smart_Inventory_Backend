@@ -555,6 +555,7 @@ export class AgentsProcessor extends WorkerHost {
           llm: true,
           rawReasoning: parsed.reasoning,
           source: 'mastra_forecasting_agent',
+          influencedByCampaigns: parsed.influencedByCampaigns,
         },
         model: 'llm',
       });
@@ -655,6 +656,9 @@ export class AgentsProcessor extends WorkerHost {
         Math.round((receivedDate.getTime() - createdDate.getTime()) / 86_400_000),
       );
 
+      const humanRating = po.receiptRating ?? null;
+      const damagedUnits = po.damagedUnits ?? null;
+
       const { reviewText, reliabilityScore } = await this.generateVendorReview({
         vendorName,
         poId: po.id,
@@ -663,14 +667,27 @@ export class AgentsProcessor extends WorkerHost {
         receivedDate,
         promisedLeadTimeDays,
         actualLeadTimeDays,
+        humanRating,
+        damagedUnits,
       });
+
+      // The human rating is written into the chunk CONTENT (searchable), not just
+      // metadata, so RAG queries about delivery quality surface it deterministically.
+      const ratingLine =
+        humanRating === null
+          ? null
+          : `Human rating: ${humanRating}/5${
+              damagedUnits != null && damagedUnits > 0 ? ` — damaged: ${damagedUnits}` : ''
+            }`;
+      const chunkContent =
+        ratingLine === null ? reviewText : `${ratingLine}\n\n${reviewText}`;
 
       await this.ragService.upsertForEntity(
         tenantId,
         'vendor_feedback',
         runId,
         KnowledgeSourceType.VENDOR_PERFORMANCE_REVIEW,
-        reviewText,
+        chunkContent,
         { vendorId: po.vendorId },
       );
 
@@ -680,7 +697,7 @@ export class AgentsProcessor extends WorkerHost {
         {
           input: `Vendor feedback generation for PO ${po.id} (actual ${actualLeadTimeDays}d vs promised ${promisedLeadTimeDays ?? 'n/a'}d lead time)`,
         },
-        { result: reviewText, reliabilityScore },
+        { result: chunkContent, reliabilityScore },
         'Feedback saved to RAG',
       );
       await this.agentRunService.updateStatus(tenantId, runId, 'completed');
@@ -698,8 +715,10 @@ export class AgentsProcessor extends WorkerHost {
     receivedDate: Date;
     promisedLeadTimeDays: number | null;
     actualLeadTimeDays: number;
+    humanRating: number | null;
+    damagedUnits: number | null;
   }): Promise<{ reviewText: string; reliabilityScore: number }> {
-    const { vendorName, poId, lineItemCount, createdDate, receivedDate, promisedLeadTimeDays, actualLeadTimeDays } =
+    const { vendorName, poId, lineItemCount, createdDate, receivedDate, promisedLeadTimeDays, actualLeadTimeDays, humanRating, damagedUnits } =
       context;
 
     const leadTimeComparison =
@@ -715,6 +734,7 @@ export class AgentsProcessor extends WorkerHost {
       'You are a vendor performance evaluator for an inventory management platform. ' +
       'Given a purchase order, write a concise qualitative review (1-3 sentences, plain text, no markdown) ' +
       'of the vendor delivery performance, and assign a vendor reliability score from 0 to 100. ' +
+      'If a human rating is provided, reflect it in your assessment (a low human rating with damage should lower the score). ' +
       'Respond with ONLY a valid JSON object, no markdown fences, no other text: ' +
       '{"review": string, "reliabilityScore": number}.';
 
@@ -725,6 +745,8 @@ export class AgentsProcessor extends WorkerHost {
       `Created at: ${createdDate.toISOString()}\n` +
       `Received at: ${receivedDate.toISOString()}\n` +
       `${leadTimeComparison}\n` +
+      (humanRating !== null ? `Human rating from receiving staff: ${humanRating}/5 stars\n` : '') +
+      (damagedUnits != null && damagedUnits > 0 ? `Damaged units reported: ${damagedUnits}\n` : '') +
       'Evaluate the delivery speed and punctuality, then assign the reliability score.';
 
     const raw = await this.gatewayLlm.chat(systemPrompt, userMessage);

@@ -15,6 +15,8 @@ export class PurchaseOrderResponseDto {
   negotiationRunId!: string | null;
   approvalRequestId!: string | null;
   lineItems!: PurchaseOrderLineItemResponseDto[];
+  receiptRating!: number | null;
+  damagedUnits!: number | null;
   createdAt!: Date;
   updatedAt!: Date;
 }

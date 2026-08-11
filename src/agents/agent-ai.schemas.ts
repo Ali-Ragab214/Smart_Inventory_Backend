@@ -44,6 +44,7 @@ export const ForecastDecisionSchema = z.object({
   confidenceScore: z.number().min(0).max(100).default(0),
   period: z.string().default('next-30-days'),
   reasoning: z.string().default(''),
+  influencedByCampaigns: z.boolean().default(false),
 });
 
 export type ForecastDecision = z.infer<typeof ForecastDecisionSchema>;

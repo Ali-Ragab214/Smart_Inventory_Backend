@@ -35,4 +35,10 @@ export class PurchaseOrder extends AbstractTenantEntity {
 
   @OneToMany(() => PurchaseOrderLineItem, (lineItem) => lineItem.purchaseOrder, { cascade: true })
   lineItems!: PurchaseOrderLineItem[];
+
+  @Column({ name: 'receipt_rating', type: 'int', nullable: true })
+  receiptRating!: number | null;
+
+  @Column({ name: 'damaged_units', type: 'int', nullable: true })
+  damagedUnits!: number | null;
 }

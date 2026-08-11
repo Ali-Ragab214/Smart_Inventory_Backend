@@ -41,7 +41,7 @@ export class MastraService {
         name: 'Forecasting Agent',
         id: 'forecasting-agent',
         instructions:
-          'You are a demand forecasting assistant. Analyze the historical stock movements of each SKU using the provided tools and project future demand. Base projections only on supplied movements; state the observed trend and your projected next-period demand per SKU concisely.',
+          'You are a demand forecasting assistant. Analyze the historical stock movements of each SKU using the provided tools and project future demand. Use get_marketing_calendar to check for marketing campaigns overlapping the forecast window: if a campaign covers a SKU, scale that SKU projectedDemand by its expectedDemandMultiplier and set influencedByCampaigns true. Base projections only on supplied movements; state the observed trend and your projected next-period demand per SKU concisely.',
         model: this.modelAdapter.toLanguageModel(),
         tools: {
           get_movement_history: createTool({
@@ -55,6 +55,16 @@ export class MastraService {
             description: 'Get a SKU by its ID including current quantity and reorder threshold',
             inputSchema: z.object({ skuId: z.string().describe('The SKU UUID') }),
             execute: async (input) => exec('get_sku')(input as Record<string, unknown>),
+          }),
+          get_marketing_calendar: createTool({
+            id: 'get_marketing_calendar',
+            description: 'Get marketing/promotion campaigns overlapping a date range, optionally filtered by SKUs, with expected demand multipliers',
+            inputSchema: z.object({
+              skuIds: z.array(z.string()).optional().describe('Optional SKU UUIDs to filter by'),
+              from: z.string().optional().describe('Start of the window (ISO date), defaults to today'),
+              to: z.string().optional().describe('End of the window (ISO date), defaults to +90 days'),
+            }),
+            execute: async (input) => exec('get_marketing_calendar')(input as Record<string, unknown>),
           }),
         },
       }),

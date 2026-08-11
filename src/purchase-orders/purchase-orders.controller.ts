@@ -47,7 +47,7 @@ export class PurchaseOrdersController {
     @Body() dto: TransitionDto,
     @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.service.transition(user.tenantId!, id, dto.status);
+    const data = await this.service.transition(user.tenantId!, id, dto.status, dto);
     return successResponse(data);
   }
 }

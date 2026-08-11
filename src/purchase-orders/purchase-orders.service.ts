@@ -92,7 +92,12 @@ export class PurchaseOrdersService {
     return this.mapper.toResponse(po);
   }
 
-  async transition(tenantId: string, id: string, targetStatus: string): Promise<PurchaseOrderResponseDto> {
+  async transition(
+    tenantId: string,
+    id: string,
+    targetStatus: string,
+    rating?: { ratingStars?: number; damagedUnits?: number },
+  ): Promise<PurchaseOrderResponseDto> {
     const po = await this.poRepository.findOne({
       where: { id, tenantId },
       relations: { lineItems: true },
@@ -136,6 +141,10 @@ export class PurchaseOrdersService {
     }
 
     const previousStatus = po.status;
+    if (targetStatus === 'received' && previousStatus !== 'received') {
+      po.receiptRating = rating?.ratingStars ?? null;
+      po.damagedUnits = rating?.damagedUnits ?? null;
+    }
     po.status = targetStatus;
     const saved = await this.poRepository.save(po);
 
