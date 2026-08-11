@@ -12,6 +12,8 @@ export const ReorderItemSchema = z.object({
   reorderThreshold: z.number().optional(),
   recommendedQuantity: z.number().optional(),
   lineTotal: z.number().optional(),
+  calculatedTCO: z.number().optional(),
+  capitalEfficiencyScore: z.number().min(0).max(100).optional(),
 });
 
 export const ReorderDecisionSchema = z.object({

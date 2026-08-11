@@ -10,6 +10,7 @@ import { StockLevel } from '../inventory/stock-levels/entities/stock-level.entit
 import { Vendor } from '../vendors/entities/vendor.entity';
 import { VendorCatalogEntry } from '../vendors/entities/vendor-catalog-entry.entity';
 import { Sku } from '../sku/entities/sku.entity';
+import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { ToolExecutorService } from './tool-executor.service';
 import { InventoryService } from './inventory.service';
@@ -116,12 +117,63 @@ export class AgentsProcessor extends WorkerHost {
       skuId: sl.skuId,
       sku: sl.sku?.sku,
       productName: sl.sku?.name,
+      skuCost: sl.sku?.cost != null ? Number(sl.sku.cost) : null,
       warehouse: sl.warehouse?.name,
       warehouseId: sl.warehouse?.id,
       quantity: sl.quantity,
       reorderThreshold: sl.reorderThreshold,
       safetyStock: sl.safetyStock,
     }));
+
+    // Deterministic warehouse pressure + holding-cost context (computed here,
+    // never by the LLM) so the agent reasons over precomputed numbers.
+    const warehouseRepo = this.dataSource.getRepository(Warehouse);
+    const warehouses = await warehouseRepo.find({ where: { tenantId } });
+    const levelTotals = await this.dataSource
+      .getRepository(StockLevel)
+      .createQueryBuilder('sl')
+      .select('sl.warehouseId', 'warehouseId')
+      .addSelect('SUM(sl.quantity)', 'total')
+      .where('sl.tenantId = :tenantId', { tenantId })
+      .groupBy('sl.warehouseId')
+      .getRawMany<{ warehouseId: string; total: string }>();
+    const warehousePressure = new Map<
+      string,
+      { capacityPct: number | null; holdingCostPercent: number }
+    >();
+    for (const wh of warehouses) {
+      const total = Number(
+        levelTotals.find((t) => t.warehouseId === wh.id)?.total ?? 0,
+      );
+      warehousePressure.set(wh.id, {
+        capacityPct:
+          wh.capacityUnits != null && wh.capacityUnits > 0
+            ? Math.round((total / wh.capacityUnits) * 100)
+            : null,
+        holdingCostPercent: wh.holdingCostPercent,
+      });
+    }
+
+    // 90-day outbound demand per SKU, normalized to units/month.
+    const monthlyDemandBySku = new Map<string, number>();
+    const distinctSkuIds = [...new Set(lowStock.map((sl) => sl.skuId))];
+    const cutoffMs = Date.now() - 90 * 86_400_000;
+    for (const sid of distinctSkuIds) {
+      try {
+        const history = await this.inventoryService.getMovementHistory(tenantId, sid);
+        const outbound90d = history.reduce((sum, m: any) => {
+          const change = Number(m.quantityChange ?? m.quantity ?? 0);
+          const createdAt = m.createdAt ?? m.date ?? null;
+          if (change < 0 && createdAt && new Date(createdAt).getTime() >= cutoffMs) {
+            return sum + Math.abs(change);
+          }
+          return sum;
+        }, 0);
+        monthlyDemandBySku.set(sid, Math.round(outbound90d / 3));
+      } catch {
+        monthlyDemandBySku.set(sid, 0);
+      }
+    }
 
     // Enrich each item with real vendor catalog data (price + lead time) so the
     // agent drafts quantities/prices from actual catalog entries, not guesses.
@@ -133,7 +185,20 @@ export class AgentsProcessor extends WorkerHost {
             'get_vendors_for_sku',
             { skuId: item.skuId },
           )) as Array<{ vendorId: string; vendorName: string; price: number; leadTimeDays: number }>;
-          return { ...item, catalogs: Array.isArray(vendors) ? vendors : [] };
+          const pressure = item.warehouseId
+            ? warehousePressure.get(item.warehouseId)
+            : undefined;
+          const holdingCostPercent = pressure?.holdingCostPercent ?? 25;
+          const skuCost = item.skuCost ?? 0;
+          return {
+            ...item,
+            warehouseCapacityPct: pressure?.capacityPct ?? null,
+            holdingCostPercent,
+            holdingCostPerUnitPerMonth:
+              skuCost > 0 ? Number(((skuCost * holdingCostPercent) / 100 / 12).toFixed(4)) : 0,
+            monthlyDemandEstimate: monthlyDemandBySku.get(item.skuId) ?? 0,
+            catalogs: Array.isArray(vendors) ? vendors : [],
+          };
         } catch (err) {
           this.logger.warn(`No catalogs for SKU ${item.skuId}: ${(err as Error).message}`);
           return { ...item, catalogs: [] };
