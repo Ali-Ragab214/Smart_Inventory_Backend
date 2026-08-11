@@ -447,6 +447,7 @@ export class AgentsProcessor extends WorkerHost {
           llm: true,
           rawReasoning: parsed.reasoning,
           source: 'mastra_forecasting_agent',
+          influencedByCampaigns: parsed.influencedByCampaigns,
         },
         model: 'llm',
       });
