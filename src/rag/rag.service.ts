@@ -22,9 +22,27 @@ export interface SearchResult {
   sourceType: string;
   vendorId: string;
   score: number;
+  ageDays: number;
 }
 
 const MIN_SCORE_THRESHOLD = 0.3;
+
+/**
+ * Freshness weighting: chunks lose ranking weight as they age so agents don't
+ * anchor on stale contracts/pricing. Fresh data (<= FRESHNESS_FULL_DAYS old)
+ * keeps its full similarity score; the weight decays linearly to
+ * FRESHNESS_FLOOR once a chunk is FRESHNESS_STALE_DAYS or older.
+ */
+const FRESHNESS_FULL_DAYS = 90;
+const FRESHNESS_STALE_DAYS = 365;
+const FRESHNESS_FLOOR = 0.6;
+
+function freshnessDecay(ageDays: number): number {
+  if (ageDays <= FRESHNESS_FULL_DAYS) return 1;
+  if (ageDays >= FRESHNESS_STALE_DAYS) return FRESHNESS_FLOOR;
+  const progress = (ageDays - FRESHNESS_FULL_DAYS) / (FRESHNESS_STALE_DAYS - FRESHNESS_FULL_DAYS);
+  return 1 - progress * (1 - FRESHNESS_FLOOR);
+}
 
 @Injectable()
 export class RagService implements OnModuleInit {
@@ -164,7 +182,9 @@ export class RagService implements OnModuleInit {
    * Semantic search over the knowledge base.
    * Embeds the query, finds the most similar chunks via cosine distance
    * (`<=>` operator), and returns them ranked with a similarity score.
-   * Results below MIN_SCORE_THRESHOLD are too weak to be useful and are dropped.
+   * Scores are freshness-decayed by chunk age (see freshnessDecay) so stale
+   * contracts/pricing rank lower and can be flagged to reviewers. Results
+   * below MIN_SCORE_THRESHOLD (after decay) are too weak to be useful and are dropped.
    * When tenantId is provided, results are scoped to that tenant (plus legacy
    * chunks with NULL tenantId for backward compatibility).
    */
@@ -205,7 +225,7 @@ export class RagService implements OnModuleInit {
     params.push(topK);
 
     const sql = `
-      SELECT id, content, "sourceType", "vendorId",
+      SELECT id, content, "sourceType", "vendorId", "createdAt",
              1 - (embedding <=> $1::vector) AS score
       FROM knowledge_chunks
       WHERE ${conditions.join(' AND ')}
@@ -213,22 +233,32 @@ export class RagService implements OnModuleInit {
       LIMIT $${params.length}
     `;
 
+    const now = Date.now();
     const rows = (await this.dataSource.query(sql, params)) as Array<{
       id: string;
       content: string;
       sourceType: string;
       vendorId: string;
+      createdAt: string;
       score: number;
     }>;
 
     return rows
-      .map((row) => ({
-        id: row.id,
-        content: row.content,
-        sourceType: row.sourceType,
-        vendorId: row.vendorId,
-        score: typeof row.score === 'number' ? row.score : parseFloat(row.score),
-      }))
+      .map((row) => {
+        const rawScore = typeof row.score === 'number' ? row.score : parseFloat(row.score);
+        const ageDays = Math.max(
+          0,
+          Math.round((now - new Date(row.createdAt).getTime()) / 86_400_000),
+        );
+        return {
+          id: row.id,
+          content: row.content,
+          sourceType: row.sourceType,
+          vendorId: row.vendorId,
+          score: rawScore * freshnessDecay(ageDays),
+          ageDays,
+        };
+      })
       .filter((row) => row.score >= MIN_SCORE_THRESHOLD);
   }
 

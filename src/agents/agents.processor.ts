@@ -268,6 +268,7 @@ export class AgentsProcessor extends WorkerHost {
     }
 
     let kbContext = 'NO_KNOWLEDGE_BASE_DATA_FOUND';
+    let kbSources: Array<{ id: string; sourceType: string; score: number }> = [];
     try {
       const results: SearchResult[] = await this.ragService.search(
         'vendor pricing discount contract payment terms',
@@ -276,6 +277,11 @@ export class AgentsProcessor extends WorkerHost {
       );
       if (results.length > 0) {
         kbContext = results.map((r) => r.content).join('\n---\n');
+        kbSources = results.map((r) => ({
+          id: r.id,
+          sourceType: r.sourceType,
+          score: r.score,
+        }));
       }
     } catch (err) {
       this.logger.warn(`Knowledge base search failed: ${(err as Error).message}`);
@@ -320,6 +326,7 @@ export class AgentsProcessor extends WorkerHost {
       proposedValue: Number(draft.requestedDiscountPercent || 0),
       round: roundNumber,
       draftType,
+      kbSources,
     };
 
     await this.approvalQueueService.create(tenantId, {
