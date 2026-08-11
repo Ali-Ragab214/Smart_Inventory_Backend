@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { RagService } from '../rag/rag.service';
 import { GatewayLanguageModelAdapter } from './gateway-language-model.adapter';
 import { ToolExecutorService } from './tool-executor.service';
+import { MemoryManagerService } from './memory-manager.service';
 
 export type AgentName = 'forecasting' | 'reorder' | 'negotiation';
 
@@ -23,6 +24,7 @@ export class MastraService {
     private readonly config: ConfigService,
     private readonly ragService: RagService,
     private readonly toolExecutor: ToolExecutorService,
+    private readonly memoryManager: MemoryManagerService,
   ) {
     this.modelAdapter = new GatewayLanguageModelAdapter(config);
     this.logger.log('Mastra framework initialized over the ITI gateway.');
@@ -144,7 +146,53 @@ export class MastraService {
     input: string,
     options: { runId?: string; maxSteps?: number } = {},
   ): Promise<{ text: string; toolCalls?: unknown[] }> {
-    const agent = this.getAgents(tenantId)[agentName];
+    let agent = this.getAgents(tenantId)[agentName];
+
+    // SEMANTIC TOOL RETRIEVAL: Dynamically retrieve tools for negotiation
+    if (agentName === 'negotiation') {
+      const topTools = await this.memoryManager.retrieveProcedural(input, 3);
+      const dynamicTools: Record<string, any> = {};
+      
+      const exec = (name: string) => (inp: Record<string, unknown>) =>
+        this.toolExecutor.execute(tenantId, name, inp);
+
+      for (const t of topTools) {
+        if (t.name === 'searchKnowledgeBase') {
+          dynamicTools[t.name] = createTool({
+            id: 'searchKnowledgeBase',
+            description: t.description,
+            inputSchema: z.object({
+              query: z.string(),
+              vendorId: z.string().uuid().optional(),
+            }),
+            execute: async (inp) => {
+              const { query, vendorId } = inp as { query: string; vendorId?: string };
+              return this.ragService.search(query, vendorId ? { vendorId } : {}, 5);
+            },
+          });
+        } else {
+          // Convert JSON schema back to Zod for Mastra (simplified)
+          dynamicTools[t.name] = createTool({
+            id: t.name,
+            description: t.description,
+            inputSchema: z.record(z.string(), z.any()), // Assuming dynamic schemas can be accepted as generic records here
+            execute: async (inp) => exec(t.name)(inp as Record<string, unknown>),
+          });
+        }
+      }
+
+      // Rebuild the negotiation agent dynamically with only the retrieved tools
+      agent = new Agent({
+        name: 'Vendor Negotiation Agent',
+        id: 'negotiation-agent',
+        instructions:
+          'You are a vendor negotiation assistant. First use searchKnowledgeBase to find relevant past terms, pricing, or contract clauses for the given vendor. Then draft a professional email asking for a discount, better pricing, or improved payment terms. Do not invent facts not present in the knowledge base. Each knowledge chunk carries an ageDays field: if the most relevant pricing or contract data is older than 180 days, lower your confidenceScore and state in your reasoning that the retrieved data is stale. Respond with ONLY a valid JSON object, no markdown fences, no other text, matching this schema: {"subject": string, "emailContent": string, "requestedDiscountPercent": number, "paymentTermsDays": number (net payment days; 30 = standard net-30), "shippingCost": number (USD the buyer pays for shipping; 50 = standard, 0 = vendor covers shipping), "valueScore": number 0-100 (overall attractiveness of this package to the buyer), "confidenceScore": number 0-100, "reasoning": string}.',
+        model: this.modelAdapter.toLanguageModel(),
+        tools: dynamicTools,
+      });
+      this.logger.log(`Dynamically built negotiation agent with ${Object.keys(dynamicTools).length} tools.`);
+    }
+
     const result = await agent.generate(
       [{ role: 'user', content: input }],
       {

@@ -16,6 +16,7 @@ import { ToolExecutorService } from './tool-executor.service';
 import { InventoryService } from './inventory.service';
 import { MastraService, AgentName } from './mastra.service';
 import { GatewayLlmService } from './gateway-llm.service';
+import { MemoryManagerService } from './memory-manager.service';
 import { ReorderDecisionSchema, NegotiationDecisionSchema, ForecastDecisionSchema } from './agent-ai.schemas';
 import { ForecastService } from '../forecasts/forecast.service';
 import { COMPOSITE_PARAMS } from './negotiation-composite.util';
@@ -47,6 +48,7 @@ export class AgentsProcessor extends WorkerHost {
     private readonly inventoryService: InventoryService,
     private readonly forecastService: ForecastService,
     private readonly gatewayLlm: GatewayLlmService,
+    private readonly memoryManager: MemoryManagerService,
   ) {
     super();
   }
@@ -98,7 +100,7 @@ export class AgentsProcessor extends WorkerHost {
       .getMany();
 
     const lowStock = levels.filter(
-      (sl) => sl.reorderThreshold > 0 && sl.quantity <= sl.reorderThreshold,
+      (sl) => sl.reorderThreshold >= 0 && sl.quantity <= sl.reorderThreshold,
     );
 
     if (lowStock.length === 0) {
@@ -123,6 +125,8 @@ export class AgentsProcessor extends WorkerHost {
       quantity: sl.quantity,
       reorderThreshold: sl.reorderThreshold,
       safetyStock: sl.safetyStock,
+      cost: sl.sku?.cost,
+      preferredVendorId: sl.sku?.preferredVendorId,
     }));
 
     // Deterministic warehouse pressure + holding-cost context (computed here,
@@ -190,6 +194,15 @@ export class AgentsProcessor extends WorkerHost {
             : undefined;
           const holdingCostPercent = pressure?.holdingCostPercent ?? 25;
           const skuCost = item.skuCost ?? 0;
+          const catalogs = Array.isArray(vendors) ? vendors : [];
+          if (catalogs.length === 0 && item.preferredVendorId) {
+            catalogs.push({
+              vendorId: item.preferredVendorId,
+              vendorName: 'Preferred Vendor',
+              price: item.cost || 0,
+              leadTimeDays: 7,
+            });
+          }
           return {
             ...item,
             warehouseCapacityPct: pressure?.capacityPct ?? null,
@@ -197,7 +210,7 @@ export class AgentsProcessor extends WorkerHost {
             holdingCostPerUnitPerMonth:
               skuCost > 0 ? Number(((skuCost * holdingCostPercent) / 100 / 12).toFixed(4)) : 0,
             monthlyDemandEstimate: monthlyDemandBySku.get(item.skuId) ?? 0,
-            catalogs: Array.isArray(vendors) ? vendors : [],
+            catalogs,
           };
         } catch (err) {
           this.logger.warn(`No catalogs for SKU ${item.skuId}: ${(err as Error).message}`);
@@ -352,7 +365,7 @@ export class AgentsProcessor extends WorkerHost {
     let kbContext = 'NO_KNOWLEDGE_BASE_DATA_FOUND';
     let kbSources: Array<{ id: string; sourceType: string; score: number }> = [];
     try {
-      const results: SearchResult[] = await this.ragService.search(
+      const results = await this.memoryManager.retrieveSemantic(
         'vendor pricing discount contract payment terms',
         vendorId ? { vendorId } : {},
         5,
@@ -369,10 +382,24 @@ export class AgentsProcessor extends WorkerHost {
       this.logger.warn(`Knowledge base search failed: ${(err as Error).message}`);
     }
 
+    let episodicContext = 'No recent interactions.';
+    try {
+      if (vendorId) {
+        const recentRuns = await this.memoryManager.retrieveRecentEpisodicContext(vendorId, 3);
+        if (recentRuns.length > 0) {
+          episodicContext = recentRuns.map((r) => 
+            `Run ${r.id} (${r.createdAt}): Round ${r.roundNumber}`
+          ).join('\n');
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Episodic memory search failed: ${(err as Error).message}`);
+    }
+
     const negotiationPrompt =
       draftType === 'counter'
-        ? `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\nVendor tier: ${vendorTier ?? 'tier2'}\n\nThis is round ${roundNumber} of negotiation. The vendor rejected our previous offer and replied:\n"${vendorReply ?? ''}"\nTheir counter suggestion is ${counterDiscountPercent ?? 'unknown'}% discount${jobData.counterPaymentTermsDays ? `, insisting on net-${jobData.counterPaymentTermsDays} terms` : ''}${jobData.counterShippingCost ? ` with $${jobData.counterShippingCost} shipping` : ''}.\n\nNegotiation policy: ${tierTone} You may request at most ${tierRequestCap}% discount.\n\nProposals carry three levers: requestedDiscountPercent, paymentTermsDays (net days; ${COMPOSITE_PARAMS.baselineTermsDays} = net-30 standard), and shippingCost (USD the buyer pays; ${COMPOSITE_PARAMS.standardShippingCost} = standard, 0 = vendor covers shipping). Also include valueScore (0-100) grading the package from the buyer's perspective.\n\nKnowledge base context:\n${kbContext}`
-        : `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\nVendor tier: ${vendorTier ?? 'tier2'}\n\nRound ${roundNumber} — opening offer.\n\nNegotiation policy: ${tierTone} You may request at most ${tierRequestCap}% discount.\n\nProposals carry three levers: requestedDiscountPercent, paymentTermsDays (net days; ${COMPOSITE_PARAMS.baselineTermsDays} = net-30 standard), and shippingCost (USD the buyer pays; ${COMPOSITE_PARAMS.standardShippingCost} = standard, 0 = vendor covers shipping). Also include valueScore (0-100) grading the package from the buyer's perspective.\n\nKnowledge base context:\n${kbContext}`;
+        ? `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\nVendor tier: ${vendorTier ?? 'tier2'}\n\nThis is round ${roundNumber} of negotiation. The vendor rejected our previous offer and replied:\n"${vendorReply ?? ''}"\nTheir counter suggestion is ${counterDiscountPercent ?? 'unknown'}% discount${jobData.counterPaymentTermsDays ? `, insisting on net-${jobData.counterPaymentTermsDays} terms` : ''}${jobData.counterShippingCost ? ` with $${jobData.counterShippingCost} shipping` : ''}.\n\nNegotiation policy: ${tierTone} You may request at most ${tierRequestCap}% discount.\n\nProposals carry three levers: requestedDiscountPercent, paymentTermsDays (net days; ${COMPOSITE_PARAMS.baselineTermsDays} = net-30 standard), and shippingCost (USD the buyer pays; ${COMPOSITE_PARAMS.standardShippingCost} = standard, 0 = vendor covers shipping). Also include valueScore (0-100) grading the package from the buyer's perspective.\n\nRecent Interactions:\n${episodicContext}\n\nKnowledge base context:\n${kbContext}`
+        : `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\nVendor tier: ${vendorTier ?? 'tier2'}\n\nRound ${roundNumber} — opening offer.\n\nNegotiation policy: ${tierTone} You may request at most ${tierRequestCap}% discount.\n\nProposals carry three levers: requestedDiscountPercent, paymentTermsDays (net days; ${COMPOSITE_PARAMS.baselineTermsDays} = net-30 standard), and shippingCost (USD the buyer pays; ${COMPOSITE_PARAMS.standardShippingCost} = standard, 0 = vendor covers shipping). Also include valueScore (0-100) grading the package from the buyer's perspective.\n\nRecent Interactions:\n${episodicContext}\n\nKnowledge base context:\n${kbContext}`;
 
     const negotiation = await this.mastraService.runAgent(
       'negotiation',
