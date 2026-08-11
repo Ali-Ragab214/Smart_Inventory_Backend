@@ -16,7 +16,7 @@ import { AgentRunDetailsResponseDto } from './dto/agent-run-details-response.dto
 import { AgentRunResponseDto } from './dto/agent-run-response.dto';
 import { AgentStepResponseDto } from './dto/agent-step-response.dto';
 
-export type AgentType = 'forecasting' | 'reorder' | 'negotiation' | 'anomaly';
+export type AgentType = 'forecasting' | 'reorder' | 'negotiation' | 'feedback';
 export type AgentRunStatus =
   | 'in_progress'
   | 'awaiting_approval'
@@ -40,7 +40,7 @@ const VALID_AGENT_TYPES: AgentType[] = [
   'forecasting',
   'reorder',
   'negotiation',
-  'anomaly',
+  'feedback',
 ];
 
 const VALID_STATUSES: AgentRunStatus[] = [

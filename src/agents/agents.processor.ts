@@ -5,12 +5,16 @@ import { DataSource } from 'typeorm';
 import { AgentRunService, AgentType } from './agent-run.service';
 import { ApprovalQueueService } from './approval-queue.service';
 import { RagService, SearchResult } from '../rag/rag.service';
+import { KnowledgeSourceType } from '../rag/entities/knowledge-chunk.entity';
 import { StockLevel } from '../inventory/stock-levels/entities/stock-level.entity';
 import { Vendor } from '../vendors/entities/vendor.entity';
+import { VendorCatalogEntry } from '../vendors/entities/vendor-catalog-entry.entity';
 import { Sku } from '../sku/entities/sku.entity';
+import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { ToolExecutorService } from './tool-executor.service';
 import { InventoryService } from './inventory.service';
 import { MastraService, AgentName } from './mastra.service';
+import { GatewayLlmService } from './gateway-llm.service';
 import { ReorderDecisionSchema, NegotiationDecisionSchema, ForecastDecisionSchema } from './agent-ai.schemas';
 import { ForecastService } from '../forecasts/forecast.service';
 
@@ -38,6 +42,7 @@ export class AgentsProcessor extends WorkerHost {
     private readonly toolExecutor: ToolExecutorService,
     private readonly inventoryService: InventoryService,
     private readonly forecastService: ForecastService,
+    private readonly gatewayLlm: GatewayLlmService,
   ) {
     super();
   }
@@ -58,6 +63,8 @@ export class AgentsProcessor extends WorkerHost {
         await this.runReorder(tenantId, run, runId);
       } else if (agentType === 'negotiation') {
         await this.runNegotiation(tenantId, run, runId, job.data);
+      } else if (agentType === 'feedback') {
+        await this.runFeedback(tenantId, run, runId);
       } else {
         await this.runGeneric(tenantId, run, runId, agentType);
       }
@@ -483,5 +490,175 @@ export class AgentsProcessor extends WorkerHost {
       this.logger.warn(`Failed to resolve vendor for SKU: ${(err as Error).message}`);
       return null;
     }
+  }
+
+  private async runFeedback(tenantId: string, run: any, runId: string): Promise<void> {
+    const poId = run.relatedPoId;
+    if (!poId) {
+      this.logger.warn(`Feedback agent run ${runId} missing relatedPoId.`);
+      await this.agentRunService.updateStatus(tenantId, runId, 'completed');
+      return;
+    }
+
+    try {
+      const po = await this.dataSource
+        .getRepository(PurchaseOrder)
+        .findOne({ where: { id: poId, tenantId }, relations: { lineItems: true } });
+
+      if (!po || !po.vendorId) {
+        this.logger.warn(`PurchaseOrder ${poId} or its vendor not found.`);
+        await this.agentRunService.updateStatus(tenantId, runId, 'completed');
+        return;
+      }
+
+      const vendor = await this.dataSource
+        .getRepository(Vendor)
+        .findOne({ where: { id: po.vendorId } });
+      const vendorName = vendor?.name ?? 'Unknown Vendor';
+
+      const skuIds = (po.lineItems ?? []).map((item) => item.skuId);
+      const catalogEntries = skuIds.length
+        ? await this.dataSource
+            .getRepository(VendorCatalogEntry)
+            .createQueryBuilder('entry')
+            .where('entry.vendorId = :vendorId', { vendorId: po.vendorId })
+            .andWhere('entry.skuId IN (:...skuIds)', { skuIds })
+            .getMany()
+        : [];
+      const promisedLeadTimeDays =
+        catalogEntries.length > 0
+          ? Math.round(
+              catalogEntries.reduce((sum, entry) => sum + entry.leadTimeDays, 0) /
+                catalogEntries.length,
+            )
+          : null;
+
+      const createdDate = new Date(po.createdAt);
+      const receivedDate = new Date(po.updatedAt);
+      const actualLeadTimeDays = Math.max(
+        0,
+        Math.round((receivedDate.getTime() - createdDate.getTime()) / 86_400_000),
+      );
+
+      const { reviewText, reliabilityScore } = await this.generateVendorReview({
+        vendorName,
+        poId: po.id,
+        lineItemCount: (po.lineItems ?? []).length,
+        createdDate,
+        receivedDate,
+        promisedLeadTimeDays,
+        actualLeadTimeDays,
+      });
+
+      await this.ragService.upsertForEntity(
+        tenantId,
+        'vendor_feedback',
+        runId,
+        KnowledgeSourceType.VENDOR_PERFORMANCE_REVIEW,
+        reviewText,
+        { vendorId: po.vendorId },
+      );
+
+      await this.agentRunService.appendStep(
+        tenantId,
+        runId,
+        {
+          input: `Vendor feedback generation for PO ${po.id} (actual ${actualLeadTimeDays}d vs promised ${promisedLeadTimeDays ?? 'n/a'}d lead time)`,
+        },
+        { result: reviewText, reliabilityScore },
+        'Feedback saved to RAG',
+      );
+      await this.agentRunService.updateStatus(tenantId, runId, 'completed');
+    } catch (err) {
+      this.logger.error(`Feedback agent failed for run ${runId}`, err as Error);
+      await this.agentRunService.updateStatus(tenantId, runId, 'completed');
+    }
+  }
+
+  private async generateVendorReview(context: {
+    vendorName: string;
+    poId: string;
+    lineItemCount: number;
+    createdDate: Date;
+    receivedDate: Date;
+    promisedLeadTimeDays: number | null;
+    actualLeadTimeDays: number;
+  }): Promise<{ reviewText: string; reliabilityScore: number }> {
+    const { vendorName, poId, lineItemCount, createdDate, receivedDate, promisedLeadTimeDays, actualLeadTimeDays } =
+      context;
+
+    const leadTimeComparison =
+      promisedLeadTimeDays === null
+        ? 'No catalog lead time is recorded for this vendor/SKU pairing.'
+        : `Promised lead time: ${promisedLeadTimeDays} day(s). Actual lead time: ${actualLeadTimeDays} day(s) (${
+            actualLeadTimeDays <= promisedLeadTimeDays
+              ? 'ON TIME'
+              : `${actualLeadTimeDays - promisedLeadTimeDays} day(s) LATE`
+          }).`;
+
+    const systemPrompt =
+      'You are a vendor performance evaluator for an inventory management platform. ' +
+      'Given a purchase order, write a concise qualitative review (1-3 sentences, plain text, no markdown) ' +
+      'of the vendor delivery performance, and assign a vendor reliability score from 0 to 100. ' +
+      'Respond with ONLY a valid JSON object, no markdown fences, no other text: ' +
+      '{"review": string, "reliabilityScore": number}.';
+
+    const userMessage =
+      `Vendor: ${vendorName}\n` +
+      `Purchase Order ID: ${poId}\n` +
+      `Line items received: ${lineItemCount}\n` +
+      `Created at: ${createdDate.toISOString()}\n` +
+      `Received at: ${receivedDate.toISOString()}\n` +
+      `${leadTimeComparison}\n` +
+      'Evaluate the delivery speed and punctuality, then assign the reliability score.';
+
+    const raw = await this.gatewayLlm.chat(systemPrompt, userMessage);
+    const parsed = parseVendorFeedback(raw);
+    if (parsed) {
+      return { reviewText: parsed.review, reliabilityScore: parsed.reliabilityScore };
+    }
+
+    const fallbackScore =
+      promisedLeadTimeDays === null
+        ? 75
+        : Math.max(
+            0,
+            Math.min(
+              100,
+              Math.round(
+                100 -
+                  ((actualLeadTimeDays - promisedLeadTimeDays) / Math.max(promisedLeadTimeDays, 1)) *
+                    40,
+              ),
+            ),
+          );
+    const fallbackReview =
+      `Vendor ${vendorName} delivered PO ${poId} in ${actualLeadTimeDays} day(s)` +
+      (promisedLeadTimeDays !== null
+        ? ` against a promised lead time of ${promisedLeadTimeDays} day(s).`
+        : ' (no promised lead time on record).');
+
+    return { reviewText: fallbackReview, reliabilityScore: fallbackScore };
+  }
+}
+
+/** Parse the gateway LLM's structured feedback output, tolerating fences/extra prose. */
+function parseVendorFeedback(raw: string): { review: string; reliabilityScore: number } | null {
+  const cleaned = raw
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/i, '')
+    .trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+
+  try {
+    const parsed = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
+    const review = typeof parsed.review === 'string' ? parsed.review.trim() : '';
+    const score = Number(parsed.reliabilityScore);
+    if (!review || !Number.isFinite(score)) return null;
+    return { review, reliabilityScore: Math.max(0, Math.min(100, Math.round(score))) };
+  } catch {
+    return null;
   }
 }

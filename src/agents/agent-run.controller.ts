@@ -8,8 +8,8 @@ import { CurrentUser } from '../auth/decorators/current-user/current-user.decora
 import { UserResponseDto } from '../users/dto/user-response.dto';
 
 class TestQueueDto {
-  @IsIn(['forecasting', 'reorder', 'negotiation', 'anomaly'])
-  agentType!: 'forecasting' | 'reorder' | 'negotiation' | 'anomaly';
+  @IsIn(['forecasting', 'reorder', 'negotiation', 'feedback'])
+  agentType!: 'forecasting' | 'reorder' | 'negotiation' | 'feedback';
 
   @IsOptional()
   @IsUUID('all', { each: true })

@@ -6,6 +6,7 @@ export enum KnowledgeSourceType {
   CATALOG = 'catalog',
   NEGOTIATION_TRANSCRIPT = 'negotiation_transcript',
   REPORT = 'report',
+  VENDOR_PERFORMANCE_REVIEW = 'vendor_performance_review',
 }
 
 /**
