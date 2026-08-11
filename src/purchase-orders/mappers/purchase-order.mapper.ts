@@ -36,6 +36,8 @@ export class PurchaseOrderMapper {
     dto.negotiationRunId = po.negotiationRunId;
     dto.approvalRequestId = po.approvalRequestId;
     dto.lineItems = (po.lineItems ?? []).map((item) => this.toLineItemResponse(item));
+    dto.receiptRating = po.receiptRating ?? null;
+    dto.damagedUnits = po.damagedUnits ?? null;
     dto.createdAt = po.createdAt;
     dto.updatedAt = po.updatedAt;
     return dto;
