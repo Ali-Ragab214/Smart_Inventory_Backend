@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgentRun } from './entities/agent-run.entity';
 import { AgentStep } from './entities/agent-step.entity';
 import { ApprovalRequest } from './entities/approval-request.entity';
+import { AgentTool } from './entities/agent-tool.entity';
 import { User } from '../users/entities/user.entity';
 import { SkuModule } from '../sku/sku.module';
 import { InventoryModule } from '../inventory/inventory.module';
@@ -20,6 +21,8 @@ import { ApprovalRequestMapper } from './mappers/approval-request.mapper';
 import { InventoryService } from './inventory.service';
 import { ToolExecutorService } from './tool-executor.service';
 import { MastraService } from './mastra.service';
+import { MemoryManagerService } from './memory-manager.service';
+import { MemoryConsolidationCronService } from './memory-consolidation.cron.service';
 import { AgentSchedulerService } from './agent-scheduler.service';
 import { SimulatedVendorService } from './simulated-vendor.service';
 import { NegotiationStateMachineService } from './negotiation-state-machine.service';
@@ -33,7 +36,7 @@ import { Sku } from '../sku/entities/sku.entity';
 import { StockMovement } from '../inventory/stock-movements/entities/stock-movement.entity';
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AgentRun, AgentStep, ApprovalRequest, User, VendorNegotiationProfile, Sku, StockMovement]),
+    TypeOrmModule.forFeature([AgentRun, AgentStep, ApprovalRequest, AgentTool, User, VendorNegotiationProfile, Sku, StockMovement]),
     BullModule.registerQueue({ name: 'agent-jobs' }),
     SkuModule,
     InventoryModule,
@@ -53,12 +56,14 @@ import { StockMovement } from '../inventory/stock-movements/entities/stock-movem
     ApprovalRequestMapper,
     InventoryService,
     ToolExecutorService,
+    MemoryManagerService,
+    MemoryConsolidationCronService,
     MastraService,
     AgentSchedulerService,
     SimulatedVendorService,
     NegotiationStateMachineService,
     ForecastSchedulerService,
   ],
-  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MastraService, GatewayLlmService, SimulatedVendorService],
+  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MemoryManagerService, MastraService, GatewayLlmService, SimulatedVendorService],
 })
 export class AgentsModule {}

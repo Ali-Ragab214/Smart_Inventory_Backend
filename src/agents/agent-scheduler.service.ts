@@ -15,7 +15,7 @@ export class AgentSchedulerService {
   async handleLowStockDetected(event: LowStockDetectedEvent) {
     this.logger.log(`[Organic Trigger] Low stock detected for SKU ${event.payload.skuId}. Waking up Agents...`);
     try {
-      // Trigger Reorder Agent
+      // 1. Trigger Reorder Agent (to draft Purchase Order)
       const reorderResult = await this.agentRunService.start(event.tenantId, 'reorder', {
         skuIds: [event.payload.skuId],
       });

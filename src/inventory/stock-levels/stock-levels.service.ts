@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { NotificationEvents } from '../../notifications/events/notification-events';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { StockLevel } from './entities/stock-level.entity';
@@ -40,6 +42,7 @@ export class StockLevelsService {
     @InjectRepository(PurchaseOrder)
     private readonly poRepo: Repository<PurchaseOrder>,
     private readonly dataSource: DataSource,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async findByWarehouse(
@@ -285,7 +288,7 @@ export class StockLevelsService {
     });
     const existingSkuIds = new Set(existing.map((sl) => sl.skuId));
 
-    const allSkus = await this.skuRepo.find({ select: ['id'] });
+    const allSkus = await this.skuRepo.find({ where: { tenantId }, select: ['id'] });
     const missingSkus = allSkus.filter((s) => !existingSkuIds.has(s.id));
 
     if (missingSkus.length === 0) return 0;
@@ -341,6 +344,20 @@ export class StockLevelsService {
     await this.dataSource.transaction(async (manager) => {
       await manager.save(StockLevel, entries);
     });
+
+    for (const entry of entries) {
+      if (entry.quantity <= entry.reorderThreshold) {
+        this.eventEmitter.emit(NotificationEvents.LOW_STOCK_DETECTED, {
+          tenantId: entry.tenantId,
+          payload: {
+            skuId: entry.skuId,
+            warehouseId: entry.warehouseId,
+            quantity: entry.quantity,
+            reorderThreshold: entry.reorderThreshold,
+          },
+        });
+      }
+    }
   }
 
   async autoInitializeForSkus(tenantId: string, skuIds: string[]): Promise<void> {
