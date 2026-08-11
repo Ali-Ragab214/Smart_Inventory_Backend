@@ -17,6 +17,7 @@ import { MastraService, AgentName } from './mastra.service';
 import { GatewayLlmService } from './gateway-llm.service';
 import { ReorderDecisionSchema, NegotiationDecisionSchema, ForecastDecisionSchema } from './agent-ai.schemas';
 import { ForecastService } from '../forecasts/forecast.service';
+import { COMPOSITE_PARAMS } from './negotiation-composite.util';
 
 type AgentJobData = {
   runId: string;
@@ -24,6 +25,8 @@ type AgentJobData = {
   tenantId: string;
   draftType?: 'opening' | 'counter';
   counterDiscountPercent?: number;
+  counterPaymentTermsDays?: number;
+  counterShippingCost?: number;
   vendorReply?: string;
   roundNumber?: number;
   offeredDiscountPercent?: number;
@@ -253,19 +256,33 @@ export class AgentsProcessor extends WorkerHost {
     const vendorReply = jobData.vendorReply;
 
     let vendorName: string | null = null;
+    let vendorTier: string | null = null;
     if (vendorId) {
       try {
         const vendor = await this.dataSource
           .getRepository(Vendor)
           .createQueryBuilder('vendor')
           .select('vendor.name', 'name')
+          .addSelect('vendor.tier', 'tier')
           .where('vendor.id = :id', { id: vendorId })
           .getRawOne();
         vendorName = vendor?.name ?? null;
+        vendorTier = vendor?.tier ?? null;
       } catch (err) {
         this.logger.warn(`Failed to load vendor name: ${(err as Error).message}`);
       }
     }
+
+    // Deterministic tier parameters (not prose): how aggressively WE may push a
+    // request. tier1 = strategic partner (be respectful), tier3 = commodity.
+    const TIER_MAX_REQUEST: Record<string, number> = { tier1: 5, tier2: 10, tier3: 15 };
+    const tierRequestCap = vendorTier ? (TIER_MAX_REQUEST[vendorTier] ?? 10) : 10;
+    const tierTone =
+      vendorTier === 'tier1'
+        ? 'Tier 1 strategic partner — keep tone collaborative; this vendor is bulk-only (min $1,000 orders).'
+        : vendorTier === 'tier3'
+          ? 'Tier 3 commodity vendor — normal negotiation applies.'
+          : 'Tier 2 standard vendor — normal negotiation applies.';
 
     let kbContext = 'NO_KNOWLEDGE_BASE_DATA_FOUND';
     let kbSources: Array<{ id: string; sourceType: string; score: number }> = [];
@@ -289,8 +306,8 @@ export class AgentsProcessor extends WorkerHost {
 
     const negotiationPrompt =
       draftType === 'counter'
-        ? `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\n\nThis is round ${roundNumber} of negotiation. The vendor rejected our previous offer and replied:\n"${vendorReply ?? ''}"\nTheir counter suggestion is ${counterDiscountPercent ?? 'unknown'}% discount.\n\nKnowledge base context:\n${kbContext}`
-        : `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\n\nRound ${roundNumber} — opening offer.\n\nKnowledge base context:\n${kbContext}`;
+        ? `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\nVendor tier: ${vendorTier ?? 'tier2'}\n\nThis is round ${roundNumber} of negotiation. The vendor rejected our previous offer and replied:\n"${vendorReply ?? ''}"\nTheir counter suggestion is ${counterDiscountPercent ?? 'unknown'}% discount${jobData.counterPaymentTermsDays ? `, insisting on net-${jobData.counterPaymentTermsDays} terms` : ''}${jobData.counterShippingCost ? ` with $${jobData.counterShippingCost} shipping` : ''}.\n\nNegotiation policy: ${tierTone} You may request at most ${tierRequestCap}% discount.\n\nProposals carry three levers: requestedDiscountPercent, paymentTermsDays (net days; ${COMPOSITE_PARAMS.baselineTermsDays} = net-30 standard), and shippingCost (USD the buyer pays; ${COMPOSITE_PARAMS.standardShippingCost} = standard, 0 = vendor covers shipping). Also include valueScore (0-100) grading the package from the buyer's perspective.\n\nKnowledge base context:\n${kbContext}`
+        : `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\nVendor tier: ${vendorTier ?? 'tier2'}\n\nRound ${roundNumber} — opening offer.\n\nNegotiation policy: ${tierTone} You may request at most ${tierRequestCap}% discount.\n\nProposals carry three levers: requestedDiscountPercent, paymentTermsDays (net days; ${COMPOSITE_PARAMS.baselineTermsDays} = net-30 standard), and shippingCost (USD the buyer pays; ${COMPOSITE_PARAMS.standardShippingCost} = standard, 0 = vendor covers shipping). Also include valueScore (0-100) grading the package from the buyer's perspective.\n\nKnowledge base context:\n${kbContext}`;
 
     const negotiation = await this.mastraService.runAgent(
       'negotiation',
@@ -317,13 +334,39 @@ export class AgentsProcessor extends WorkerHost {
       }
     }
 
+    // Tier cap enforced as a parameter AFTER the LLM drafts: never propose more
+    // than the tier allows, regardless of what the model wrote. Terms and
+    // shipping are clamped the same way — parameters, not prose.
+    const rawRequested = Number(draft.requestedDiscountPercent || 0);
+    const requestedDiscountPercent = Math.min(
+      tierRequestCap,
+      Math.max(0, rawRequested),
+    );
+    const paymentTermsDays = Math.min(
+      COMPOSITE_PARAMS.maxTermsDays,
+      Math.max(30, Math.round(Number(draft.paymentTermsDays) || COMPOSITE_PARAMS.baselineTermsDays)),
+    );
+    const shippingCost = Math.min(
+      COMPOSITE_PARAMS.maxShippingCost,
+      Math.max(0, Number(draft.shippingCost) || COMPOSITE_PARAMS.standardShippingCost),
+    );
+    const valueScore = Math.min(
+      100,
+      Math.max(0, Math.round(Number(draft.valueScore) || 0)),
+    );
+
     const payload = {
       vendorId,
       emailContent: typeof draft.emailContent === 'string' ? draft.emailContent : '',
       subject: typeof draft.subject === 'string' ? draft.subject : '',
-      requestedDiscountPercent: Number(draft.requestedDiscountPercent || 0),
+      requestedDiscountPercent,
+      paymentTermsDays,
+      shippingCost,
+      valueScore,
       confidenceScore: Number(draft.confidenceScore || 0),
-      proposedValue: Number(draft.requestedDiscountPercent || 0),
+      proposedValue: requestedDiscountPercent,
+      tier: vendorTier ?? 'tier2',
+      tierRequestCap,
       round: roundNumber,
       draftType,
       kbSources,
