@@ -373,21 +373,6 @@ export class AgentsProcessor extends WorkerHost {
     }
 
     let lowStockContext: unknown[] = [];
-    if (agentType === 'anomaly') {
-      try {
-        const low = await this.inventoryService.findLowStock(tenantId);
-        lowStockContext = low.map((sl: any) => ({
-          skuId: sl.skuId,
-          sku: sl.sku?.sku ?? null,
-          productName: sl.sku?.name ?? null,
-          warehouse: sl.warehouse?.name ?? null,
-          quantity: sl.quantity ?? null,
-          reorderThreshold: sl.reorderThreshold ?? null,
-        }));
-      } catch (err) {
-        this.logger.warn(`Failed to load low-stock levels: ${(err as Error).message}`);
-      }
-    }
 
     const result = await this.mastraService.runAgent(
       agentType as AgentName,
