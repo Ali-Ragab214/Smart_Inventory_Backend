@@ -8,7 +8,7 @@ import { RagService } from '../rag/rag.service';
 import { GatewayLanguageModelAdapter } from './gateway-language-model.adapter';
 import { ToolExecutorService } from './tool-executor.service';
 
-export type AgentName = 'anomaly' | 'forecasting' | 'reorder' | 'negotiation';
+export type AgentName = 'forecasting' | 'reorder' | 'negotiation';
 
 type AgentSet = Record<AgentName, Agent>;
 
@@ -28,7 +28,7 @@ export class MastraService {
     this.logger.log('Mastra framework initialized over the ITI gateway.');
   }
 
-  /** Build (and cache) the 4 agents for one tenant, tools closed over tenantId. */
+  /** Build (and cache) the 3 agents for one tenant, tools closed over tenantId. */
   private getAgents(tenantId: string): AgentSet {
     const cached = this.tenantAgents.get(tenantId);
     if (cached) return cached;
@@ -37,34 +37,6 @@ export class MastraService {
       this.toolExecutor.execute(tenantId, name, input);
 
     const agents: AgentSet = {
-      anomaly: new Agent({
-        name: 'Anomaly Agent',
-        id: 'anomaly-agent',
-        instructions:
-          'You are an inventory fraud and anomaly detection assistant. Scan recent stock movements and levels for suspicious activity (unexpected drops, abnormal order quantities, negative adjustments without sales). Use the provided tools to gather real data, then report findings concisely with the actual SKU, date, movement type, and quantity. Do not invent events.',
-        model: this.modelAdapter.toLanguageModel(),
-        tools: {
-          get_low_stock_skus: createTool({
-            id: 'get_low_stock_skus',
-            description: 'Get all SKUs that are below or at their reorder threshold across all warehouses',
-            inputSchema: z.object({}),
-            execute: async () => exec('get_low_stock_skus')({}),
-          }),
-          get_movement_history: createTool({
-            id: 'get_movement_history',
-            description: 'Get recent stock movement history for a SKU',
-            inputSchema: z.object({ skuId: z.string().describe('The SKU UUID') }),
-            execute: async (input) => exec('get_movement_history')(input as Record<string, unknown>),
-          }),
-          get_sku: createTool({
-            id: 'get_sku',
-            description: 'Get a SKU by its ID including current quantity and reorder threshold',
-            inputSchema: z.object({ skuId: z.string().describe('The SKU UUID') }),
-            execute: async (input) => exec('get_sku')(input as Record<string, unknown>),
-          }),
-        },
-      }),
-
       forecasting: new Agent({
         name: 'Forecasting Agent',
         id: 'forecasting-agent',

@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { AgentRunService } from './agent-run.service';
 import { NotificationEvents } from '../notifications/events/notification-events';
 import { LowStockDetectedEvent } from '../notifications/events/low-stock-detected.event';
+import { PoReceivedEvent } from '../notifications/events/po-received.event';
 
 @Injectable()
 export class AgentSchedulerService {
@@ -24,6 +25,21 @@ export class AgentSchedulerService {
 
     } catch (error) {
       this.logger.error(`[Organic Trigger] Failed to trigger agents organically`, error);
+    }
+  }
+
+  @OnEvent(NotificationEvents.PO_RECEIVED, { async: true })
+  async handlePoReceived(event: PoReceivedEvent) {
+    this.logger.log(`[Organic Trigger] PO ${event.payload.purchaseOrderId} received. Waking up Feedback Agent...`);
+    try {
+      const result = await this.agentRunService.start(event.tenantId, 'feedback', {
+        poId: event.payload.purchaseOrderId,
+      });
+      const runId = (result as any).data?.id ?? (result as any).id;
+      await this.agentRunService.enqueue(event.tenantId, runId, 'feedback');
+      this.logger.log(`[Organic Trigger] Feedback agent queued for runId ${runId}`);
+    } catch (error) {
+      this.logger.error(`[Organic Trigger] Failed to trigger Feedback Agent organically`, error);
     }
   }
 }

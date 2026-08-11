@@ -6,7 +6,7 @@ import { Sku } from '../../sku/entities/sku.entity';
 export class AgentRun extends AbstractTenantEntity {
   @Column({
     type: 'enum',
-    enum: ['forecasting', 'reorder', 'negotiation', 'anomaly'],
+    enum: ['forecasting', 'reorder', 'negotiation', 'feedback'],
   })
   agentType!: string;
 

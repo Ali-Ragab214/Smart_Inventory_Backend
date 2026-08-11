@@ -11,7 +11,6 @@ import {
   NotificationType,
 } from './entities/notification.entity';
 import { ApprovalRequestedEvent } from './events/approval-requested.event';
-import { AnomalyFlaggedEvent } from './events/anomaly-flagged.event';
 import { LowStockDetectedEvent } from './events/low-stock-detected.event';
 import { NotificationEvents } from './events/notification-events';
 import { PoReceivedEvent } from './events/po-received.event';
@@ -65,32 +64,6 @@ export class NotificationEventListeners {
       UserRole.WAREHOUSE_MANAGER,
     ]);
     await this.emailService.sendApprovalRequired(recipients, payload);
-  }
-
-  @OnEvent(NotificationEvents.ANOMALY_FLAGGED, { async: true })
-  async handleAnomalyFlagged(event: AnomalyFlaggedEvent): Promise<void> {
-    const { payload } = event;
-    const notification = await this.persist({
-      tenantId: event.tenantId,
-      type: NotificationType.ANOMALY_FLAGGED,
-      severity: NotificationSeverity.CRITICAL,
-      title: 'Inventory anomaly flagged',
-      message: payload.description,
-      data: payload as object,
-      warehouseId: payload.warehouseId ?? null,
-    });
-
-    if (payload.warehouseId) {
-      this.gateway.emitToWarehouse(payload.warehouseId, notification);
-    } else {
-      this.gateway.emitToTenant(event.tenantId, notification);
-    }
-
-    const recipients = await this.findUsersByRoles(event.tenantId, [
-      UserRole.SUPER_ADMIN,
-      UserRole.TENANT_OWNER,
-    ]);
-    await this.emailService.sendCriticalAnomaly(recipients, payload);
   }
 
   @OnEvent(NotificationEvents.LOW_STOCK_DETECTED, { async: true })

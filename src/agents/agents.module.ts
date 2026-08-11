@@ -4,13 +4,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgentRun } from './entities/agent-run.entity';
 import { AgentStep } from './entities/agent-step.entity';
 import { ApprovalRequest } from './entities/approval-request.entity';
-import { AnomalyFlag } from './entities/anomaly-flag.entity';
 import { User } from '../users/entities/user.entity';
 import { SkuModule } from '../sku/sku.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { VendorsModule } from '../vendors/vendors.module';
-import { AnomalyFlagsService } from './anomaly-flags.service';
-import { AnomalyFlagsController } from './anomaly-flags.controller';
 import { ApprovalQueueService } from './approval-queue.service';
 import { ApprovalQueueController } from './approval-queue.controller';
 import { LLMService } from './llm.service';
@@ -20,7 +17,6 @@ import { AgentsProcessor } from './agents.processor';
 import { GatewayLlmService } from './gateway-llm.service';
 import { AgentRunMapper } from './mappers/agent-run.mapper';
 import { ApprovalRequestMapper } from './mappers/approval-request.mapper';
-import { AnomalyFlagMapper } from './mappers/anomaly-flag.mapper';
 import { InventoryService } from './inventory.service';
 import { ToolExecutorService } from './tool-executor.service';
 import { MastraService } from './mastra.service';
@@ -37,7 +33,7 @@ import { Sku } from '../sku/entities/sku.entity';
 import { StockMovement } from '../inventory/stock-movements/entities/stock-movement.entity';
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AgentRun, AgentStep, ApprovalRequest, AnomalyFlag, User, VendorNegotiationProfile, Sku, StockMovement]),
+    TypeOrmModule.forFeature([AgentRun, AgentStep, ApprovalRequest, User, VendorNegotiationProfile, Sku, StockMovement]),
     BullModule.registerQueue({ name: 'agent-jobs' }),
     SkuModule,
     InventoryModule,
@@ -46,17 +42,15 @@ import { StockMovement } from '../inventory/stock-movements/entities/stock-movem
     PurchaseOrdersModule,
     ForecastsModule,
   ],
-  controllers: [ApprovalQueueController, AgentRunController, AnomalyFlagsController, ForecastController],
+  controllers: [ApprovalQueueController, AgentRunController, ForecastController],
   providers: [
     LLMService,
-    AnomalyFlagsService,
     ApprovalQueueService,
     AgentRunService,
     AgentsProcessor,
     GatewayLlmService,
     AgentRunMapper,
     ApprovalRequestMapper,
-    AnomalyFlagMapper,
     InventoryService,
     ToolExecutorService,
     MastraService,

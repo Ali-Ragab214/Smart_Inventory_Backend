@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { User } from '../users/entities/user.entity';
 import { ApprovalRequestedPayload } from './events/approval-requested.event';
-import { AnomalyFlaggedPayload } from './events/anomaly-flagged.event';
 
 @Injectable()
 export class EmailService {
@@ -95,22 +94,6 @@ export class EmailService {
         <p>The ${payload.agentType} agent (run ${payload.agentRunId}, step ${payload.stepNumber}) is waiting for your review.</p>
         <p>Reasoning: ${payload.reasoning ?? 'No reasoning provided'}</p>
         <p style="font-size: 12px; color: #666;">Sign in to StockSavvy to approve or reject this request.</p>
-      </div>
-    `;
-    await this.sendToUsers(users, subject, html);
-  }
-
-  async sendCriticalAnomaly(
-    users: User[],
-    payload: AnomalyFlaggedPayload,
-  ): Promise<void> {
-    const subject = 'Critical anomaly flagged in inventory';
-    const html = `
-      <div style="font-family: sans-serif; padding: 20px;">
-        <h2>Critical Anomaly Flagged</h2>
-        <p>${payload.description}</p>
-        ${payload.skuId ? `<p>SKU: ${payload.skuId}</p>` : ''}
-        <p style="font-size: 12px; color: #666;">Review the anomaly in the StockSavvy dashboard.</p>
       </div>
     `;
     await this.sendToUsers(users, subject, html);

@@ -50,6 +50,17 @@ export class RagService implements OnModuleInit {
       this.logger.warn('Index knowledge_chunks_embedding_idx already exists or concurrent creation ignored.');
     }
 
+    // TypeORM synchronize does not add new labels to an existing Postgres enum
+    // type in place; register the feedback source type explicitly so the
+    // Feedback Agent's reviews can be stored on pre-seeded databases.
+    try {
+      await this.dataSource.query(
+        "ALTER TYPE knowledge_chunks_sourceType_enum ADD VALUE IF NOT EXISTS 'vendor_performance_review'",
+      );
+    } catch (e) {
+      this.logger.warn('knowledge_chunks sourceType enum already up to date.');
+    }
+
     // Phase 1 — add entity/tenant scoping columns for event-driven ingestion.
     // These columns let us upsert (replace stale) chunks keyed by source entity
     // and scope all retrieval per tenant.

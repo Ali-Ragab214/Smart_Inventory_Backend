@@ -43,18 +43,8 @@ export const ForecastDecisionSchema = z.object({
 
 export type ForecastDecision = z.infer<typeof ForecastDecisionSchema>;
 
-export const AnomalyDecisionSchema = z.object({
-  isAnomaly: z.boolean().default(false),
-  severity: z.enum(['low', 'medium', 'high']).default('low'),
-  explanation: z.string().default(''),
-  confidenceScore: z.number().min(0).max(100).default(0),
-});
-
-export type AnomalyDecision = z.infer<typeof AnomalyDecisionSchema>;
-
 export const AgentDecisionSchemas = {
   reorder: ReorderDecisionSchema,
   negotiation: NegotiationDecisionSchema,
   forecasting: ForecastDecisionSchema,
-  anomaly: AnomalyDecisionSchema,
 } as const;
