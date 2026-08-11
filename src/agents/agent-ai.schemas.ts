@@ -12,6 +12,8 @@ export const ReorderItemSchema = z.object({
   reorderThreshold: z.number().optional(),
   recommendedQuantity: z.number().optional(),
   lineTotal: z.number().optional(),
+  calculatedTCO: z.number().optional(),
+  capitalEfficiencyScore: z.number().min(0).max(100).optional(),
 });
 
 export const ReorderDecisionSchema = z.object({
@@ -28,6 +30,9 @@ export const NegotiationDecisionSchema = z.object({
   subject: z.string().default(''),
   emailContent: z.string().default(''),
   requestedDiscountPercent: z.number().min(0).max(100).default(0),
+  paymentTermsDays: z.number().min(1).max(120).default(30),
+  shippingCost: z.number().min(0).max(100).default(50),
+  valueScore: z.number().min(0).max(100).default(0),
   confidenceScore: z.number().min(0).max(100).default(0),
   reasoning: z.string().default(''),
 });

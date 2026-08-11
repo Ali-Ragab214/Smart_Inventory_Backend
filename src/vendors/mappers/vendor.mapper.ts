@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Vendor } from '../entities/vendor.entity';
+import { Vendor, VendorTier } from '../entities/vendor.entity';
 import { CreateVendorDto } from '../dto/create-vendor.dto';
 import { UpdateVendorDto } from '../dto/update-vendor.dto';
 import { VendorResponseDto } from '../dto/vendor-response.dto';
@@ -11,6 +11,7 @@ export class VendorMapper {
     vendor.name = dto.name;
     vendor.contactEmail = dto.contactEmail ?? null;
     vendor.contactPhone = dto.contactPhone ?? null;
+    vendor.tier = dto.tier ?? VendorTier.TIER_2;
     return vendor;
   }
 
@@ -20,6 +21,7 @@ export class VendorMapper {
     dto.name = entity.name;
     dto.contactEmail = entity.contactEmail ?? null;
     dto.contactPhone = entity.contactPhone ?? null;
+    dto.tier = entity.tier;
     dto.createdAt = entity.createdAt;
     dto.updatedAt = entity.updatedAt;
     return dto;
@@ -38,6 +40,9 @@ export class VendorMapper {
     }
     if (dto.contactPhone !== undefined) {
       entity.contactPhone = dto.contactPhone ?? null;
+    }
+    if (dto.tier !== undefined) {
+      entity.tier = dto.tier;
     }
     return entity;
   }

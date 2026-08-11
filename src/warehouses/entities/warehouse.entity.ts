@@ -29,4 +29,8 @@ export class Warehouse extends AbstractTenantEntity {
 
   @Column({ name: 'capacity_units', type: 'int', nullable: true })
   capacityUnits!: number | null;
+
+  /** Annual cost of holding inventory, as a % of SKU cost (default 25%/yr). */
+  @Column({ name: 'holding_cost_pct', type: 'int', default: 25 })
+  holdingCostPercent!: number;
 }

@@ -10,6 +10,7 @@ import { StockLevel } from '../inventory/stock-levels/entities/stock-level.entit
 import { Vendor } from '../vendors/entities/vendor.entity';
 import { VendorCatalogEntry } from '../vendors/entities/vendor-catalog-entry.entity';
 import { Sku } from '../sku/entities/sku.entity';
+import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { PurchaseOrder } from '../purchase-orders/entities/purchase-order.entity';
 import { ToolExecutorService } from './tool-executor.service';
 import { InventoryService } from './inventory.service';
@@ -17,6 +18,7 @@ import { MastraService, AgentName } from './mastra.service';
 import { GatewayLlmService } from './gateway-llm.service';
 import { ReorderDecisionSchema, NegotiationDecisionSchema, ForecastDecisionSchema } from './agent-ai.schemas';
 import { ForecastService } from '../forecasts/forecast.service';
+import { COMPOSITE_PARAMS } from './negotiation-composite.util';
 
 type AgentJobData = {
   runId: string;
@@ -24,6 +26,8 @@ type AgentJobData = {
   tenantId: string;
   draftType?: 'opening' | 'counter';
   counterDiscountPercent?: number;
+  counterPaymentTermsDays?: number;
+  counterShippingCost?: number;
   vendorReply?: string;
   roundNumber?: number;
   offeredDiscountPercent?: number;
@@ -113,12 +117,63 @@ export class AgentsProcessor extends WorkerHost {
       skuId: sl.skuId,
       sku: sl.sku?.sku,
       productName: sl.sku?.name,
+      skuCost: sl.sku?.cost != null ? Number(sl.sku.cost) : null,
       warehouse: sl.warehouse?.name,
       warehouseId: sl.warehouse?.id,
       quantity: sl.quantity,
       reorderThreshold: sl.reorderThreshold,
       safetyStock: sl.safetyStock,
     }));
+
+    // Deterministic warehouse pressure + holding-cost context (computed here,
+    // never by the LLM) so the agent reasons over precomputed numbers.
+    const warehouseRepo = this.dataSource.getRepository(Warehouse);
+    const warehouses = await warehouseRepo.find({ where: { tenantId } });
+    const levelTotals = await this.dataSource
+      .getRepository(StockLevel)
+      .createQueryBuilder('sl')
+      .select('sl.warehouseId', 'warehouseId')
+      .addSelect('SUM(sl.quantity)', 'total')
+      .where('sl.tenantId = :tenantId', { tenantId })
+      .groupBy('sl.warehouseId')
+      .getRawMany<{ warehouseId: string; total: string }>();
+    const warehousePressure = new Map<
+      string,
+      { capacityPct: number | null; holdingCostPercent: number }
+    >();
+    for (const wh of warehouses) {
+      const total = Number(
+        levelTotals.find((t) => t.warehouseId === wh.id)?.total ?? 0,
+      );
+      warehousePressure.set(wh.id, {
+        capacityPct:
+          wh.capacityUnits != null && wh.capacityUnits > 0
+            ? Math.round((total / wh.capacityUnits) * 100)
+            : null,
+        holdingCostPercent: wh.holdingCostPercent,
+      });
+    }
+
+    // 90-day outbound demand per SKU, normalized to units/month.
+    const monthlyDemandBySku = new Map<string, number>();
+    const distinctSkuIds = [...new Set(lowStock.map((sl) => sl.skuId))];
+    const cutoffMs = Date.now() - 90 * 86_400_000;
+    for (const sid of distinctSkuIds) {
+      try {
+        const history = await this.inventoryService.getMovementHistory(tenantId, sid);
+        const outbound90d = history.reduce((sum, m: any) => {
+          const change = Number(m.quantityChange ?? m.quantity ?? 0);
+          const createdAt = m.createdAt ?? m.date ?? null;
+          if (change < 0 && createdAt && new Date(createdAt).getTime() >= cutoffMs) {
+            return sum + Math.abs(change);
+          }
+          return sum;
+        }, 0);
+        monthlyDemandBySku.set(sid, Math.round(outbound90d / 3));
+      } catch {
+        monthlyDemandBySku.set(sid, 0);
+      }
+    }
 
     // Enrich each item with real vendor catalog data (price + lead time) so the
     // agent drafts quantities/prices from actual catalog entries, not guesses.
@@ -130,7 +185,20 @@ export class AgentsProcessor extends WorkerHost {
             'get_vendors_for_sku',
             { skuId: item.skuId },
           )) as Array<{ vendorId: string; vendorName: string; price: number; leadTimeDays: number }>;
-          return { ...item, catalogs: Array.isArray(vendors) ? vendors : [] };
+          const pressure = item.warehouseId
+            ? warehousePressure.get(item.warehouseId)
+            : undefined;
+          const holdingCostPercent = pressure?.holdingCostPercent ?? 25;
+          const skuCost = item.skuCost ?? 0;
+          return {
+            ...item,
+            warehouseCapacityPct: pressure?.capacityPct ?? null,
+            holdingCostPercent,
+            holdingCostPerUnitPerMonth:
+              skuCost > 0 ? Number(((skuCost * holdingCostPercent) / 100 / 12).toFixed(4)) : 0,
+            monthlyDemandEstimate: monthlyDemandBySku.get(item.skuId) ?? 0,
+            catalogs: Array.isArray(vendors) ? vendors : [],
+          };
         } catch (err) {
           this.logger.warn(`No catalogs for SKU ${item.skuId}: ${(err as Error).message}`);
           return { ...item, catalogs: [] };
@@ -253,19 +321,33 @@ export class AgentsProcessor extends WorkerHost {
     const vendorReply = jobData.vendorReply;
 
     let vendorName: string | null = null;
+    let vendorTier: string | null = null;
     if (vendorId) {
       try {
         const vendor = await this.dataSource
           .getRepository(Vendor)
           .createQueryBuilder('vendor')
           .select('vendor.name', 'name')
+          .addSelect('vendor.tier', 'tier')
           .where('vendor.id = :id', { id: vendorId })
           .getRawOne();
         vendorName = vendor?.name ?? null;
+        vendorTier = vendor?.tier ?? null;
       } catch (err) {
         this.logger.warn(`Failed to load vendor name: ${(err as Error).message}`);
       }
     }
+
+    // Deterministic tier parameters (not prose): how aggressively WE may push a
+    // request. tier1 = strategic partner (be respectful), tier3 = commodity.
+    const TIER_MAX_REQUEST: Record<string, number> = { tier1: 5, tier2: 10, tier3: 15 };
+    const tierRequestCap = vendorTier ? (TIER_MAX_REQUEST[vendorTier] ?? 10) : 10;
+    const tierTone =
+      vendorTier === 'tier1'
+        ? 'Tier 1 strategic partner — keep tone collaborative; this vendor is bulk-only (min $1,000 orders).'
+        : vendorTier === 'tier3'
+          ? 'Tier 3 commodity vendor — normal negotiation applies.'
+          : 'Tier 2 standard vendor — normal negotiation applies.';
 
     let kbContext = 'NO_KNOWLEDGE_BASE_DATA_FOUND';
     let kbSources: Array<{ id: string; sourceType: string; score: number }> = [];
@@ -289,8 +371,8 @@ export class AgentsProcessor extends WorkerHost {
 
     const negotiationPrompt =
       draftType === 'counter'
-        ? `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\n\nThis is round ${roundNumber} of negotiation. The vendor rejected our previous offer and replied:\n"${vendorReply ?? ''}"\nTheir counter suggestion is ${counterDiscountPercent ?? 'unknown'}% discount.\n\nKnowledge base context:\n${kbContext}`
-        : `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\n\nRound ${roundNumber} — opening offer.\n\nKnowledge base context:\n${kbContext}`;
+        ? `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\nVendor tier: ${vendorTier ?? 'tier2'}\n\nThis is round ${roundNumber} of negotiation. The vendor rejected our previous offer and replied:\n"${vendorReply ?? ''}"\nTheir counter suggestion is ${counterDiscountPercent ?? 'unknown'}% discount${jobData.counterPaymentTermsDays ? `, insisting on net-${jobData.counterPaymentTermsDays} terms` : ''}${jobData.counterShippingCost ? ` with $${jobData.counterShippingCost} shipping` : ''}.\n\nNegotiation policy: ${tierTone} You may request at most ${tierRequestCap}% discount.\n\nProposals carry three levers: requestedDiscountPercent, paymentTermsDays (net days; ${COMPOSITE_PARAMS.baselineTermsDays} = net-30 standard), and shippingCost (USD the buyer pays; ${COMPOSITE_PARAMS.standardShippingCost} = standard, 0 = vendor covers shipping). Also include valueScore (0-100) grading the package from the buyer's perspective.\n\nKnowledge base context:\n${kbContext}`
+        : `Vendor ID: ${vendorId ?? 'unknown'}\nVendor name: ${vendorName ?? 'unknown'}\nVendor tier: ${vendorTier ?? 'tier2'}\n\nRound ${roundNumber} — opening offer.\n\nNegotiation policy: ${tierTone} You may request at most ${tierRequestCap}% discount.\n\nProposals carry three levers: requestedDiscountPercent, paymentTermsDays (net days; ${COMPOSITE_PARAMS.baselineTermsDays} = net-30 standard), and shippingCost (USD the buyer pays; ${COMPOSITE_PARAMS.standardShippingCost} = standard, 0 = vendor covers shipping). Also include valueScore (0-100) grading the package from the buyer's perspective.\n\nKnowledge base context:\n${kbContext}`;
 
     const negotiation = await this.mastraService.runAgent(
       'negotiation',
@@ -317,13 +399,39 @@ export class AgentsProcessor extends WorkerHost {
       }
     }
 
+    // Tier cap enforced as a parameter AFTER the LLM drafts: never propose more
+    // than the tier allows, regardless of what the model wrote. Terms and
+    // shipping are clamped the same way — parameters, not prose.
+    const rawRequested = Number(draft.requestedDiscountPercent || 0);
+    const requestedDiscountPercent = Math.min(
+      tierRequestCap,
+      Math.max(0, rawRequested),
+    );
+    const paymentTermsDays = Math.min(
+      COMPOSITE_PARAMS.maxTermsDays,
+      Math.max(30, Math.round(Number(draft.paymentTermsDays) || COMPOSITE_PARAMS.baselineTermsDays)),
+    );
+    const shippingCost = Math.min(
+      COMPOSITE_PARAMS.maxShippingCost,
+      Math.max(0, Number(draft.shippingCost) || COMPOSITE_PARAMS.standardShippingCost),
+    );
+    const valueScore = Math.min(
+      100,
+      Math.max(0, Math.round(Number(draft.valueScore) || 0)),
+    );
+
     const payload = {
       vendorId,
       emailContent: typeof draft.emailContent === 'string' ? draft.emailContent : '',
       subject: typeof draft.subject === 'string' ? draft.subject : '',
-      requestedDiscountPercent: Number(draft.requestedDiscountPercent || 0),
+      requestedDiscountPercent,
+      paymentTermsDays,
+      shippingCost,
+      valueScore,
       confidenceScore: Number(draft.confidenceScore || 0),
-      proposedValue: Number(draft.requestedDiscountPercent || 0),
+      proposedValue: requestedDiscountPercent,
+      tier: vendorTier ?? 'tier2',
+      tierRequestCap,
       round: roundNumber,
       draftType,
       kbSources,

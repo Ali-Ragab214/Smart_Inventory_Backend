@@ -130,10 +130,12 @@ export class ApprovalQueueService {
         await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'sent');
         const payload = (saved.payload ?? {}) as Record<string, unknown>;
         const offeredDiscount = Number(payload.requestedDiscountPercent ?? payload.finalDiscountPercent ?? 0);
+        const paymentTermsDays = Math.max(30, Math.round(Number(payload.paymentTermsDays) || 30));
+        const shippingCost = Math.max(0, Number(payload.shippingCost) || 50);
         await this.simulatedVendorService.respondToOffer(
           tenantId,
           saved.agentRunId,
-          offeredDiscount,
+          { discountPercent: offeredDiscount, paymentTermsDays, shippingCost },
           saved.id,
         );
       }

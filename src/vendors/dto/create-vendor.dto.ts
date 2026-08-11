@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsEmail,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -8,6 +9,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { VendorTier } from '../entities/vendor.entity';
 
 export class CreateVendorDto {
   @ApiProperty({ example: 'Acme Supplies' })
@@ -33,4 +35,13 @@ export class CreateVendorDto {
   @MaxLength(50)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   contactPhone?: string;
+
+  @ApiPropertyOptional({
+    description: 'tier1 = strategic/bulk-only partner · tier2 = standard · tier3 = commodity',
+    enum: VendorTier,
+    example: VendorTier.TIER_2,
+  })
+  @IsOptional()
+  @IsIn(Object.values(VendorTier))
+  tier?: VendorTier;
 }
