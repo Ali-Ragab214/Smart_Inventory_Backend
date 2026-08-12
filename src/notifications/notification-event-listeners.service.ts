@@ -14,6 +14,7 @@ import { ApprovalRequestedEvent } from './events/approval-requested.event';
 import { LowStockDetectedEvent } from './events/low-stock-detected.event';
 import { NotificationEvents } from './events/notification-events';
 import { PoReceivedEvent } from './events/po-received.event';
+import { PoCreatedEvent } from './events/po-created.event';
 import { VendorRespondedEvent } from './events/vendor-responded.event';
 import { NotificationMapper } from './mappers/notification.mapper';
 import { NotificationsGateway } from './notifications.gateway';
@@ -94,6 +95,23 @@ export class NotificationEventListeners {
       severity: NotificationSeverity.INFO,
       title: 'Purchase order received',
       message: `Purchase order ${payload.purchaseOrderId} was received with ${payload.lineItemCount} line item(s).`,
+      data: payload as object,
+      warehouseId: payload.warehouseId,
+    });
+
+    this.gateway.emitToWarehouse(payload.warehouseId, notification);
+    this.gateway.emitToTenant(event.tenantId, notification);
+  }
+
+  @OnEvent(NotificationEvents.PO_CREATED, { async: true })
+  async handlePoCreated(event: PoCreatedEvent): Promise<void> {
+    const { payload } = event;
+    const notification = await this.persist({
+      tenantId: event.tenantId,
+      type: NotificationType.PO_CREATED,
+      severity: NotificationSeverity.INFO,
+      title: 'New Purchase Order Created',
+      message: `Purchase order ${payload.purchaseOrderId} was created with ${payload.lineItemCount} line item(s).`,
       data: payload as object,
       warehouseId: payload.warehouseId,
     });

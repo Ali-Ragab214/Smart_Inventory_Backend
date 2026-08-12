@@ -41,8 +41,12 @@ export class User extends AbstractEntity {
    * Password hash is excluded from SELECT by default.
    * Use createQueryBuilder().addSelect('user.passwordHash') when it is needed (auth flows only).
    */
-  @Column({ type: 'varchar', length: 255, select: false, name: 'password_hash' })
-  passwordHash!: string;
+  @Column({ type: 'varchar', length: 255, select: false, name: 'password_hash', nullable: true })
+  passwordHash!: string | null;
+
+  @Index({ unique: true, sparse: true })
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'google_id' })
+  googleId!: string | null;
 
   @Column({ type: 'enum', enum: UserRole, default: UserRole.TENANT_OWNER })
   role!: UserRole;
@@ -84,12 +88,13 @@ export class User extends AbstractEntity {
   @BeforeInsert()
   @BeforeUpdate()
   async hashPassword(): Promise<void> {
-    if (this.passwordHash) {
+    if (this.passwordHash && !this.passwordHash.startsWith('$2a$')) {
       this.passwordHash = await bcrypt.hash(this.passwordHash, 10);
     }
   }
 
   async comparePassword(plain: string): Promise<boolean> {
+    if (!this.passwordHash) return false;
     return bcrypt.compare(plain, this.passwordHash);
   }
 }

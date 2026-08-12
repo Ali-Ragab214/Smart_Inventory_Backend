@@ -142,6 +142,34 @@ export class UsersService {
       .getOne();
   }
 
+  async findByGoogleId(googleId: string): Promise<User | null> {
+    return this.userRepository.findOne({ where: { googleId } });
+  }
+
+  async createGoogleUser(profile: any): Promise<User> {
+    const tenant = this.tenantRepository.create({
+      name: (profile.firstName || profile.email.split('@')[0]) + "'s Organization",
+    });
+    const savedTenant = await this.tenantRepository.save(tenant);
+    this.logger.log(`Tenant created for Google user: ${savedTenant.id}`);
+
+    const user = this.userRepository.create({
+      email: profile.email,
+      username: profile.email.split('@')[0] + Math.floor(Math.random() * 10000).toString(),
+      name: `${profile.firstName} ${profile.lastName}`.trim() || profile.email.split('@')[0],
+      avatarUrl: profile.picture,
+      googleId: profile.googleId,
+      role: UserRole.TENANT_OWNER,
+      tenantId: savedTenant.id,
+      isActive: true,
+      passwordHash: null,
+    });
+    
+    const saved = await this.userRepository.save(user);
+    this.logger.log(`Google User created: ${saved.id}`);
+    return saved;
+  }
+
   async findByResetTokenForAuth(token: string): Promise<User | null> {
     return this.userRepository
       .createQueryBuilder('user')

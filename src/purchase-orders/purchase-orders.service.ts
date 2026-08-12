@@ -13,6 +13,7 @@ import { StockMovementService } from '../inventory/stock-movements/stock-movemen
 import { MovementReason } from '../inventory/stock-movements/enums/movement-reason.enum';
 import { NotificationEvents } from '../notifications/events/notification-events';
 import { PoReceivedEvent } from '../notifications/events/po-received.event';
+import { PoCreatedEvent } from '../notifications/events/po-created.event';
 import { RagEvents, PurchaseOrderSavedEvent } from '../rag/rag-events';
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
@@ -58,6 +59,19 @@ export class PurchaseOrdersService {
         unitPrice: li.unitPrice,
       })),
     } satisfies PurchaseOrderSavedEvent);
+
+    // Emit Notification event for the new PO
+    this.eventEmitter.emit(
+      NotificationEvents.PO_CREATED,
+      new PoCreatedEvent(tenantId, {
+        purchaseOrderId: loaded!.id,
+        warehouseId: loaded!.warehouseId,
+        vendorId: loaded!.vendorId,
+        status: loaded!.status,
+        lineItemCount: loaded!.lineItems.length,
+        createdAt: new Date().toISOString(),
+      }),
+    );
 
     return this.mapper.toResponse(loaded!);
   }
