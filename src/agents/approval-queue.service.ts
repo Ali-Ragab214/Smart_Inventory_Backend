@@ -14,7 +14,7 @@ import { NotificationEvents } from '../notifications/events/notification-events'
 import { ApprovalRequestedEvent } from '../notifications/events/approval-requested.event';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 import { RagEvents, NegotiationApprovedEvent } from '../rag/rag-events';
-import { SimulatedVendorService } from './simulated-vendor.service';
+import { VendorChannelService } from './vendor-channel/vendor-channel.service';
 
 @Injectable()
 export class ApprovalQueueService {
@@ -26,7 +26,7 @@ export class ApprovalQueueService {
     private readonly mapper: ApprovalRequestMapper,
     private readonly agentRunService: AgentRunService,
     private readonly purchaseOrdersService: PurchaseOrdersService,
-    private readonly simulatedVendorService: SimulatedVendorService,
+    private readonly vendorChannelService: VendorChannelService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -126,17 +126,19 @@ export class ApprovalQueueService {
         createdPoIds = await this.finalizeNegotiationPo(tenantId, saved, reviewedBy);
         await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'completed');
       } else {
-        // Step 1 (Vendor Outreach) approved → send the offer to the simulated vendor.
+        // Step 1 (Vendor Outreach) approved → deliver the offer through the
+        // configured vendor channel (real email when enabled, else simulated).
         await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'sent');
         const payload = (saved.payload ?? {}) as Record<string, unknown>;
         const offeredDiscount = Number(payload.requestedDiscountPercent ?? payload.finalDiscountPercent ?? 0);
         const paymentTermsDays = Math.max(30, Math.round(Number(payload.paymentTermsDays) || 30));
         const shippingCost = Math.max(0, Number(payload.shippingCost) || 50);
-        await this.simulatedVendorService.respondToOffer(
+        await this.vendorChannelService.dispatchOffer(
           tenantId,
+          saved.id,
           saved.agentRunId,
           { discountPercent: offeredDiscount, paymentTermsDays, shippingCost },
-          saved.id,
+          payload,
         );
       }
     }

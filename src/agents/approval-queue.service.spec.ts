@@ -6,7 +6,7 @@ import { ApprovalRequest } from './entities/approval-request.entity';
 import { ApprovalRequestMapper } from './mappers/approval-request.mapper';
 import { AgentRunService } from './agent-run.service';
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
-import { SimulatedVendorService } from './simulated-vendor.service';
+import { VendorChannelService } from './vendor-channel/vendor-channel.service';
 import { ApprovalQueryDto } from './dto/approval-query.dto';
 
 describe('ApprovalQueueService', () => {
@@ -39,7 +39,7 @@ describe('ApprovalQueueService', () => {
         { provide: getRepositoryToken(ApprovalRequest), useValue: mockApprovalRepo },
         { provide: AgentRunService, useValue: mockAgentRunService },
         { provide: PurchaseOrdersService, useValue: mockPurchaseOrdersService },
-        { provide: SimulatedVendorService, useValue: { respondToOffer: jest.fn() } },
+        { provide: VendorChannelService, useValue: { dispatchOffer: jest.fn() } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();

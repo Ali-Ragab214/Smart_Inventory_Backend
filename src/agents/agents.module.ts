@@ -26,6 +26,11 @@ import { MemoryConsolidationCronService } from './memory-consolidation.cron.serv
 import { AgentSchedulerService } from './agent-scheduler.service';
 import { SimulatedVendorService } from './simulated-vendor.service';
 import { NegotiationStateMachineService } from './negotiation-state-machine.service';
+import { VendorChannelService } from './vendor-channel/vendor-channel.service';
+import { VendorEmailService } from './vendor-channel/vendor-email.service';
+import { VendorReplyParser } from './vendor-channel/vendor-reply.parser';
+import { VendorInboundMailService } from './vendor-channel/vendor-inbound-mail.service';
+import { VendorChannelController } from './vendor-channel/vendor-channel.controller';
 import { VendorNegotiationProfile } from './entities/vendor-negotiation-profile.entity';
 import { RagModule } from '../rag/rag.module';
 import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module';
@@ -45,7 +50,7 @@ import { StockMovement } from '../inventory/stock-movements/entities/stock-movem
     PurchaseOrdersModule,
     ForecastsModule,
   ],
-  controllers: [ApprovalQueueController, AgentRunController, ForecastController],
+  controllers: [ApprovalQueueController, AgentRunController, ForecastController, VendorChannelController],
   providers: [
     LLMService,
     ApprovalQueueService,
@@ -62,8 +67,12 @@ import { StockMovement } from '../inventory/stock-movements/entities/stock-movem
     AgentSchedulerService,
     SimulatedVendorService,
     NegotiationStateMachineService,
+    VendorChannelService,
+    VendorEmailService,
+    VendorReplyParser,
+    VendorInboundMailService,
     ForecastSchedulerService,
   ],
-  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MemoryManagerService, MastraService, GatewayLlmService, SimulatedVendorService],
+  exports: [LLMService, ApprovalQueueService, AgentRunService, ToolExecutorService, MemoryManagerService, MastraService, GatewayLlmService, SimulatedVendorService, VendorChannelService, VendorEmailService, VendorInboundMailService],
 })
 export class AgentsModule {}
