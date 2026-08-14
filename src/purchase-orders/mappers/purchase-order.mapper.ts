@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PurchaseOrder } from '../entities/purchase-order.entity';
 import { PurchaseOrderLineItem } from '../entities/purchase-order-line-item.entity';
-import { CreatePurchaseOrderDto, CreatePurchaseOrderLineItemDto } from '../dto/create-purchase-order.dto';
+import { CreatePurchaseOrderDto } from '../dto/create-purchase-order.dto';
+import { CreatePurchaseOrderLineItemDto } from '../dto/create-purchase-order-line-item.dto';
 import { PurchaseOrderResponseDto, PurchaseOrderLineItemResponseDto } from '../dto/purchase-order-response.dto';
 
 @Injectable()

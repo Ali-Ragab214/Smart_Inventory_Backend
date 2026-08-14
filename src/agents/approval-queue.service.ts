@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,6 +15,8 @@ import { ApprovalRequestedEvent } from '../notifications/events/approval-request
 import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 import { RagEvents, NegotiationApprovedEvent } from '../rag/rag-events';
 import { VendorChannelService } from './vendor-channel/vendor-channel.service';
+import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserRole } from '../users/entities/user.entity';
 
 @Injectable()
 export class ApprovalQueueService {
@@ -61,13 +63,19 @@ export class ApprovalQueueService {
   }
 
   async findAll(
-    tenantId: string,
+    user: UserResponseDto,
     query: ApprovalQueryDto,
   ): Promise<{ data: ApprovalRequestResponseDto[]; total: number }> {
     const qb = this.approvalRepo
       .createQueryBuilder('approval')
-      .where('approval.tenantId = :tenantId', { tenantId })
+      .where('approval.tenantId = :tenantId', { tenantId: user.tenantId })
       .orderBy('approval.createdAt', 'DESC');
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      qb.andWhere('approval.payload::text LIKE :warehouseIdLike', {
+        warehouseIdLike: `%${user.warehouseId}%`,
+      });
+    }
 
     if (query.status) {
       qb.andWhere('approval.status = :status', {
@@ -89,14 +97,22 @@ export class ApprovalQueueService {
   }
 
   async approve(
-    tenantId: string,
+    user: UserResponseDto,
     id: string,
     reviewedBy: string,
     editedPayload?: object,
   ): Promise<ApprovalRequestResponseDto & { createdPoIds?: string[] }> {
+    const tenantId = user.tenantId!;
     const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
       throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
+    }
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      const payloadStr = JSON.stringify(approval.payload);
+      if (!payloadStr.includes(user.warehouseId)) {
+        throw new ForbiddenException({ message: 'You do not have permission to approve this request.', code: 'FORBIDDEN' });
+      }
     }
 
     approval.status = 'approved';
@@ -311,13 +327,21 @@ export class ApprovalQueueService {
   }
 
   async reject(
-    tenantId: string,
+    user: UserResponseDto,
     id: string,
     reviewedBy: string,
   ): Promise<ApprovalRequestResponseDto> {
+    const tenantId = user.tenantId!;
     const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
       throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
+    }
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      const payloadStr = JSON.stringify(approval.payload);
+      if (!payloadStr.includes(user.warehouseId)) {
+        throw new ForbiddenException({ message: 'You do not have permission to reject this request.', code: 'FORBIDDEN' });
+      }
     }
 
     approval.status = 'rejected';
@@ -329,14 +353,23 @@ export class ApprovalQueueService {
   }
 
   async negotiate(
-    tenantId: string,
+    user: UserResponseDto,
     id: string,
     reviewedBy: string,
   ): Promise<ApprovalRequestResponseDto> {
+    const tenantId = user.tenantId!;
     const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
       throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
     }
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      const payloadStr = JSON.stringify(approval.payload);
+      if (!payloadStr.includes(user.warehouseId)) {
+        throw new ForbiddenException({ message: 'You do not have permission to defer this request.', code: 'FORBIDDEN' });
+      }
+    }
+
     if (approval.status !== 'pending') {
       throw new BadRequestException({ message: 'Only pending approval requests can be sent to negotiation.', code: 'APPROVAL_NOT_PENDING' });
     }

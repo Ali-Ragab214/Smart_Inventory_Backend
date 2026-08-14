@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,6 +15,8 @@ import { NotificationEvents } from '../notifications/events/notification-events'
 import { PoReceivedEvent } from '../notifications/events/po-received.event';
 import { PoCreatedEvent } from '../notifications/events/po-created.event';
 import { RagEvents, PurchaseOrderSavedEvent } from '../rag/rag-events';
+import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserRole } from '../users/entities/user.entity';
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   draft: ['pending_approval', 'rejected'],
@@ -95,7 +97,8 @@ export class PurchaseOrdersService {
     return { data: this.mapper.toResponseList(result.data), total: result.total };
   }
 
-  async findOne(tenantId: string, id: string): Promise<PurchaseOrderResponseDto> {
+  async findOne(user: UserResponseDto, id: string): Promise<PurchaseOrderResponseDto> {
+    const tenantId = user.tenantId!;
     const po = await this.poRepository.findOne({
       where: { id, tenantId },
       relations: { lineItems: true },
@@ -103,21 +106,31 @@ export class PurchaseOrdersService {
     if (!po) {
       throw new NotFoundException({ message: 'The requested purchase order could not be found.', code: 'PURCHASE_ORDER_NOT_FOUND' });
     }
+    
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId && po.warehouseId !== user.warehouseId) {
+      throw new ForbiddenException({ message: 'You do not have permission to view this purchase order.', code: 'FORBIDDEN' });
+    }
+    
     return this.mapper.toResponse(po);
   }
 
   async transition(
-    tenantId: string,
+    user: UserResponseDto,
     id: string,
     targetStatus: string,
     rating?: { ratingStars?: number; damagedUnits?: number },
   ): Promise<PurchaseOrderResponseDto> {
+    const tenantId = user.tenantId!;
     const po = await this.poRepository.findOne({
       where: { id, tenantId },
       relations: { lineItems: true },
     });
     if (!po) {
       throw new NotFoundException({ message: 'The requested purchase order could not be found.', code: 'PURCHASE_ORDER_NOT_FOUND' });
+    }
+    
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId && po.warehouseId !== user.warehouseId) {
+      throw new ForbiddenException({ message: 'You do not have permission to transition this purchase order.', code: 'FORBIDDEN' });
     }
 
     const allowed = VALID_TRANSITIONS[po.status] ?? [];

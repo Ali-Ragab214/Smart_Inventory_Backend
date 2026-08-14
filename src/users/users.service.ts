@@ -34,7 +34,7 @@ export class UsersService {
 
   /**
    * Create a new user with unique email and username checks.
-   * If role is TENANT_OWNER and warehouseName is provided, creates a warehouse automatically.
+   * If role is TENANT and warehouseName is provided, creates a warehouse automatically.
    */
   async create(currentUser: UserResponseDto | null, createUserDto: CreateUserDto): Promise<UserResponseDto> {
     const emailTaken = await this.userRepository.existsBy({
@@ -53,15 +53,34 @@ export class UsersService {
 
     const user = this.userMapper.toEntity(createUserDto);
 
-    if (currentUser?.tenantId && user.role !== UserRole.TENANT_OWNER) {
+    if (currentUser?.tenantId && user.role !== UserRole.TENANT) {
+      const tenant = await this.tenantRepository.findOne({ 
+        where: { id: currentUser.tenantId },
+        relations: ['plan']
+      });
+      
+      if (tenant) {
+        // Free trial defaults to Pro limits if no plan is selected
+        const limit = tenant.plan?.maxUsers ?? 5; 
+        const currentCount = await this.userRepository.count({ where: { tenantId: currentUser.tenantId } });
+        if (limit !== null && currentCount >= limit) {
+          throw new ConflictException({ 
+            message: `User limit reached for your plan (Max ${limit}). Please upgrade to add more users.`, 
+            code: 'PLAN_LIMIT_REACHED' 
+          });
+        }
+      }
+
       user.tenantId = currentUser.tenantId;
     }
 
     // Auto-create tenant and warehouse for tenant_owner registration BEFORE saving the user
     // to avoid multiple saves which would trigger double-hashing of the password.
-    if (user.role === UserRole.TENANT_OWNER) {
+    if (user.role === UserRole.TENANT) {
       const tenant = this.tenantRepository.create({
         name: createUserDto.name + "'s Organization",
+        subscriptionStatus: 'trialing',
+        trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days from now
       });
       const savedTenant = await this.tenantRepository.save(tenant);
       user.tenantId = savedTenant.id;
@@ -91,9 +110,7 @@ export class UsersService {
   async findAll(currentUser: UserResponseDto, query: PaginationQueryDto): Promise<{ data: UserResponseDto[]; total: number }> {
     const qb = this.userRepository.createQueryBuilder('user');
 
-    if (currentUser.role !== UserRole.SUPER_ADMIN) {
-      qb.andWhere('user.tenantId = :tenantId', { tenantId: currentUser.tenantId });
-    }
+    qb.andWhere('user.tenantId = :tenantId', { tenantId: currentUser.tenantId });
     applySortAndSearch(qb, 'user', query.sortBy, query.sortOrder, query.search, ['username', 'email', 'name']);
     const result = await paginate(qb, query.page!, query.limit!);
     return { data: this.userMapper.toResponseList(result.data), total: result.total };
@@ -104,7 +121,7 @@ export class UsersService {
    */
   async findById(currentUser: UserResponseDto | null, id: string): Promise<UserResponseDto> {
     const query: any = { id };
-    if (currentUser && currentUser.role !== UserRole.SUPER_ADMIN) {
+    if (currentUser) {
       query.tenantId = currentUser.tenantId;
     }
     const user = await this.userRepository.findOne({ where: query });
@@ -149,6 +166,8 @@ export class UsersService {
   async createGoogleUser(profile: any): Promise<User> {
     const tenant = this.tenantRepository.create({
       name: (profile.firstName || profile.email.split('@')[0]) + "'s Organization",
+      subscriptionStatus: 'trialing',
+      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days from now
     });
     const savedTenant = await this.tenantRepository.save(tenant);
     this.logger.log(`Tenant created for Google user: ${savedTenant.id}`);
@@ -159,7 +178,7 @@ export class UsersService {
       name: `${profile.firstName} ${profile.lastName}`.trim() || profile.email.split('@')[0],
       avatarUrl: profile.picture,
       googleId: profile.googleId,
-      role: UserRole.TENANT_OWNER,
+      role: UserRole.TENANT,
       tenantId: savedTenant.id,
       isActive: true,
       passwordHash: null,
@@ -190,9 +209,7 @@ export class UsersService {
    */
   async update(currentUser: UserResponseDto, id: string, updateUserDto: UpdateUserDto): Promise<UserResponseDto> {
     const query: any = { id };
-    if (currentUser.role !== UserRole.SUPER_ADMIN) {
-      query.tenantId = currentUser.tenantId;
-    }
+    query.tenantId = currentUser.tenantId;
     const existing = await this.userRepository.findOne({ where: query });
     if (!existing) {
       throw new NotFoundException({ message: "We couldn't find this user's account.", code: 'USER_NOT_FOUND' });
@@ -273,9 +290,7 @@ export class UsersService {
    */
   async remove(currentUser: UserResponseDto, id: string): Promise<void> {
     const query: any = { id };
-    if (currentUser.role !== UserRole.SUPER_ADMIN) {
-      query.tenantId = currentUser.tenantId;
-    }
+    query.tenantId = currentUser.tenantId;
     const user = await this.userRepository.findOne({ where: query });
     if (!user) {
       throw new NotFoundException({ message: "We couldn't find this user's account.", code: 'USER_NOT_FOUND' });

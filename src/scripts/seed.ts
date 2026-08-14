@@ -51,10 +51,9 @@ async function bootstrap() {
     userRepo.create({ name, email, username, passwordHash: 'Password123!', role, tenantId: tenant.id, warehouseId: whId, isActive: true });
 
   const users = [
-    createUsr('Admin User', 'admin@acme.com', 'admin', UserRole.SUPER_ADMIN, null),
-    createUsr('Owner User', 'owner@acme.com', 'owner', UserRole.TENANT_OWNER, null),
+    createUsr('Owner User', 'owner@acme.com', 'owner', UserRole.TENANT, null),
     createUsr('Warehouse Manager', 'manager@acme.com', 'manager', UserRole.WAREHOUSE_MANAGER, w1.id),
-    createUsr('Inventory Clerk', 'clerk@acme.com', 'clerk', UserRole.INVENTORY_CLERK, w1.id),
+    createUsr('Inventory Clerk', 'clerk@acme.com', 'clerk', UserRole.CLERK, w1.id),
   ];
   await userRepo.save(users);
 

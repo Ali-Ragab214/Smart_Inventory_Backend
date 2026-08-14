@@ -9,9 +9,12 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import { TenantGuard } from '../auth/tenant.guard';
+import { UserRole } from '../users/entities/user.entity';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import {
   ApiBadRequestResponse,
@@ -31,10 +34,12 @@ import { successResponse } from '../utils/response.util';
 
 @ApiTags('warehouses')
 @Controller('warehouses')
+@UseGuards(TenantGuard)
 export class WarehousesController {
   constructor(private readonly warehousesService: WarehousesService) {}
 
   @Post()
+  @Roles(UserRole.TENANT)
   @ApiOperation({ summary: 'Create a warehouse' })
   @ApiCreatedResponse({ type: WarehouseResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request body' })
@@ -80,7 +85,7 @@ export class WarehousesController {
     return successResponse(data);
   }
 
-  @Roles('super_admin', 'tenant_owner')
+  @Roles(UserRole.TENANT)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a warehouse' })

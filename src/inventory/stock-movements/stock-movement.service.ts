@@ -145,7 +145,7 @@ export class StockMovementService {
       await slRepo.save(stockLevel);
 
       // Step 7b: Emit low-stock event when quantity crosses the reorder threshold
-      if (stockLevel.reorderThreshold > 0 && newBalance <= stockLevel.reorderThreshold) {
+      if (stockLevel.reorderThreshold >= 0 && newBalance <= stockLevel.reorderThreshold) {
         this.eventEmitter.emit(
           NotificationEvents.LOW_STOCK_DETECTED,
           new LowStockDetectedEvent(tenantId, {
@@ -198,12 +198,17 @@ export class StockMovementService {
     tenantId: string,
     skuId: string,
     query: StockMovementQueryDto,
+    warehouseId?: string,
   ): Promise<{ data: StockMovementResponseDto[]; total: number }> {
     const qb = this.movementRepo
       .createQueryBuilder('sm')
       .where('sm.skuId = :skuId', { skuId })
       .andWhere('sm.tenantId = :tenantId', { tenantId })
       .orderBy('sm.createdAt', 'DESC');
+
+    if (warehouseId) {
+      qb.andWhere('sm.warehouseId = :warehouseId', { warehouseId });
+    }
 
     if (query.from) {
       qb.andWhere('sm.createdAt >= :from', { from: new Date(query.from) });

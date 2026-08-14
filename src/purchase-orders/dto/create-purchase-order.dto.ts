@@ -14,19 +14,7 @@ import {
   ArrayMinSize,
 } from 'class-validator';
 
-export class CreatePurchaseOrderLineItemDto {
-  @IsUUID()
-  @IsNotEmpty()
-  skuId!: string;
-
-  @IsInt()
-  @Min(1)
-  quantity!: number;
-
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @IsPositive()
-  unitPrice!: number;
-}
+import { CreatePurchaseOrderLineItemDto } from './create-purchase-order-line-item.dto';
 
 export class CreatePurchaseOrderDto {
   @IsUUID()

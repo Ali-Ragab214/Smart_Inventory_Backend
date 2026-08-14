@@ -5,11 +5,10 @@ import { Warehouse } from '../../warehouses/entities/warehouse.entity';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 
 export enum UserRole {
-  SUPER_ADMIN = 'super_admin',
-  TENANT_OWNER = 'tenant_owner',
+  TENANT = 'tenant',
   WAREHOUSE_MANAGER = 'warehouse_manager',
-  BRANCH_MANAGER = 'branch_manager',
-  INVENTORY_CLERK = 'inventory_clerk',
+  CLERK = 'clerk',
+  SUPER_ADMIN = 'super_admin',
 }
 
 @Entity('users')
@@ -48,7 +47,7 @@ export class User extends AbstractEntity {
   @Column({ type: 'varchar', length: 255, nullable: true, name: 'google_id' })
   googleId!: string | null;
 
-  @Column({ type: 'enum', enum: UserRole, default: UserRole.TENANT_OWNER })
+  @Column({ type: 'enum', enum: UserRole, default: UserRole.TENANT })
   role!: UserRole;
 
   @Column({ type: 'boolean', default: true })

@@ -20,7 +20,7 @@ const mockRepository = {
 
 const adminUser = {
   id: 'admin-1',
-  role: UserRole.SUPER_ADMIN,
+  role: UserRole.TENANT,
   tenantId: null,
 } as any;
 

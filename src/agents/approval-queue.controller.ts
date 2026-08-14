@@ -35,7 +35,7 @@ export class ApprovalQueueController {
   @ApiOperation({ summary: 'List approval requests (optionally filtered by status)' })
   @ApiOkResponse({ type: ApprovalRequestResponseDto, isArray: true })
   async findAll(@Query() query: ApprovalQueryDto, @CurrentUser() user: UserResponseDto) {
-    const { data, total } = await this.service.findAll(user.tenantId!, query);
+    const { data, total } = await this.service.findAll(user, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
@@ -50,7 +50,7 @@ export class ApprovalQueueController {
     @Body() body: ApproveApprovalRequestDto,
     @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.service.approve(user.tenantId!, id, body.reviewedBy, body.editedPayload);
+    const data = await this.service.approve(user, id, body.reviewedBy, body.editedPayload);
     return successResponse(data);
   }
 
@@ -65,7 +65,7 @@ export class ApprovalQueueController {
     @Body() body: RejectApprovalRequestDto,
     @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.service.reject(user.tenantId!, id, body.reviewedBy);
+    const data = await this.service.reject(user, id, body.reviewedBy);
     return successResponse(data);
   }
 
@@ -80,7 +80,7 @@ export class ApprovalQueueController {
     @Body() body: NegotiateApprovalRequestDto,
     @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.service.negotiate(user.tenantId!, id, body.reviewedBy);
+    const data = await this.service.negotiate(user, id, body.reviewedBy);
     return successResponse(data);
   }
 }

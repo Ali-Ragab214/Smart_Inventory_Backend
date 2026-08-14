@@ -61,7 +61,7 @@ export class NotificationEventListeners {
 
     const recipients = await this.findUsersByRoles(event.tenantId, [
       UserRole.SUPER_ADMIN,
-      UserRole.TENANT_OWNER,
+      UserRole.TENANT,
       UserRole.WAREHOUSE_MANAGER,
     ]);
     await this.emailService.sendApprovalRequired(recipients, payload);

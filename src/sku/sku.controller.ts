@@ -46,6 +46,9 @@ export class SkuController {
   @ApiOkResponse({ type: SkuResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request payload' })
   async create(@Body() createSkuDto: CreateSkuDto, @CurrentUser() user: UserResponseDto) {
+    if (user.warehouseId && !createSkuDto.warehouseId) {
+      createSkuDto.warehouseId = user.warehouseId;
+    }
     const data = await this.skuService.create(user.tenantId!, createSkuDto);
     return successResponse(data);
   }
@@ -105,7 +108,7 @@ export class SkuController {
   @ApiOperation({ summary: 'List SKUs' })
   @ApiOkResponse({ type: SkuResponseDto, isArray: true })
   async findAll(@Query() query: SkuQueryDto, @CurrentUser() user: UserResponseDto) {
-    const { data, total } = await this.skuService.findAll(user.tenantId!, query);
+    const { data, total } = await this.skuService.findAll(user, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 

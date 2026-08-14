@@ -8,6 +8,7 @@ import { Sku } from '../../sku/entities/sku.entity';
 import { Warehouse } from '../../warehouses/entities/warehouse.entity';
 import { User, UserRole } from '../../users/entities/user.entity';
 import { PurchaseOrder } from '../../purchase-orders/entities/purchase-order.entity';
+import { LowStockDetectedEvent } from '../../notifications/events/low-stock-detected.event';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
 import { UpdateStockLevelDto } from './dto/update-stock-level.dto';
 import { StockLevelResponseDto } from './dto/stock-level-response.dto';
@@ -120,11 +121,11 @@ export class StockLevelsService {
       .where('sl.quantity <= sl.reorderThreshold')
       .orderBy('sl.quantity', 'ASC');
 
-    if (user.role === UserRole.TENANT_OWNER) {
+    if (user.role === UserRole.TENANT) {
       qb.andWhere('warehouse.tenantId = :tenantId', { tenantId: user.tenantId });
     } else if (
       user.role === UserRole.WAREHOUSE_MANAGER ||
-      user.role === UserRole.INVENTORY_CLERK
+      user.role === UserRole.CLERK
     ) {
       if (!user.warehouseId) {
         return [];
@@ -312,7 +313,37 @@ export class StockLevelsService {
   }
 
   async autoInitializeForWarehouse(tenantId: string, warehouseId: string): Promise<void> {
-    await this.initializeForWarehouse(tenantId, warehouseId);
+    // Disabled auto-initialization of all SKUs for new warehouses
+    // await this.initializeForWarehouse(tenantId, warehouseId);
+  }
+
+  async initializeSkuForWarehouse(tenantId: string, skuId: string, warehouseId: string): Promise<void> {
+    const existing = await this.stockLevelRepo.findOne({
+      where: { skuId, warehouseId, tenantId },
+    });
+    if (!existing) {
+      const entry = this.stockLevelRepo.create({
+        skuId,
+        warehouseId,
+        tenantId,
+        quantity: 0,
+        reorderThreshold: 0,
+        safetyStock: 0,
+      });
+      const saved = await this.stockLevelRepo.save(entry);
+      
+      this.eventEmitter.emit(
+        NotificationEvents.LOW_STOCK_DETECTED,
+        new LowStockDetectedEvent(saved.tenantId, {
+          skuId: saved.skuId,
+          warehouseId: saved.warehouseId,
+          quantity: saved.quantity,
+          reorderThreshold: saved.reorderThreshold,
+          safetyStock: saved.safetyStock,
+          detectedAt: new Date().toISOString(),
+        })
+      );
+    }
   }
 
   async autoInitializeForSku(tenantId: string, skuId: string): Promise<void> {

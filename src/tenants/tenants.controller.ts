@@ -6,6 +6,7 @@ import { CurrentUser } from '../auth/decorators/current-user/current-user.decora
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { Roles } from '../auth/roles.decorator';
 import { successResponse } from '../utils/response.util';
+import { UserRole } from '../users/entities/user.entity';
 
 @ApiTags('tenants')
 @ApiBearerAuth()
@@ -14,7 +15,7 @@ export class TenantsController {
   constructor(private readonly tenantsService: TenantsService) {}
 
   @Get(':id')
-  @Roles('super_admin', 'tenant_owner')
+  @Roles(UserRole.TENANT)
   @ApiOperation({ summary: 'Get a tenant by id' })
   @ApiParam({ name: 'id', description: 'Tenant UUID' })
   @ApiOkResponse({ description: 'Tenant retrieved successfully' })
@@ -22,7 +23,7 @@ export class TenantsController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: UserResponseDto
   ) {
-    if (user.role === 'tenant_owner' && user.tenantId !== id) {
+    if (user.role === UserRole.TENANT && user.tenantId !== id) {
       throw new Error('Forbidden resource');
     }
     const data = await this.tenantsService.findById(id);
@@ -30,7 +31,7 @@ export class TenantsController {
   }
 
   @Patch(':id')
-  @Roles('super_admin', 'tenant_owner')
+  @Roles(UserRole.TENANT)
   @ApiOperation({ summary: 'Update a tenant' })
   @ApiParam({ name: 'id', description: 'Tenant UUID' })
   @ApiOkResponse({ description: 'Tenant updated successfully' })
@@ -40,7 +41,7 @@ export class TenantsController {
     @CurrentUser() user: UserResponseDto
   ) {
     // Basic authorization check: tenant owners can only update their own tenant
-    if (user.role === 'tenant_owner' && user.tenantId !== id) {
+    if (user.role === UserRole.TENANT && user.tenantId !== id) {
       throw new Error('Forbidden resource');
     }
     const data = await this.tenantsService.update(id, dto);

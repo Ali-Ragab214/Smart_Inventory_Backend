@@ -13,6 +13,10 @@ import { paginate } from '../utils/pagination.util';
 import { applySortAndSearch } from '../utils/query.util';
 import { StockLevelsService } from '../inventory/stock-levels/stock-levels.service';
 
+import { TenantsService } from '../tenants/tenants.service';
+import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserRole } from '../users/entities/user.entity';
+
 @Injectable()
 export class SkuService {
   constructor(
@@ -21,9 +25,20 @@ export class SkuService {
     private readonly skuMapper: SkuMapper,
     private readonly dataSource: DataSource,
     private readonly stockLevelsService: StockLevelsService,
+    private readonly tenantsService: TenantsService,
   ) {}
 
   async create(tenantId: string, createSkuDto: CreateSkuDto): Promise<SkuResponseDto> {
+    const tenant = await this.tenantsService.findById(tenantId);
+    const limit = tenant.plan?.maxSkus ?? 10000; // Free trial defaults to Pro
+    const currentCount = await this.skuRepository.count({ where: { tenantId } });
+    if (limit !== null && currentCount >= limit) {
+      throw new ConflictException({ 
+        message: `SKU limit reached for your plan (Max ${limit}). Please upgrade to add more SKUs.`, 
+        code: 'PLAN_LIMIT_REACHED' 
+      });
+    }
+
     const existing = await this.skuRepository.findOne({
       where: { sku: createSkuDto.sku, tenantId },
     });
@@ -33,13 +48,32 @@ export class SkuService {
     const skuEntity = this.skuMapper.toEntity(createSkuDto);
     skuEntity.tenantId = tenantId;
     const savedEntity = await this.skuRepository.save(skuEntity);
-    await this.stockLevelsService.autoInitializeForSku(tenantId, savedEntity.id);
+    if (createSkuDto.warehouseId) {
+      await this.stockLevelsService.initializeSkuForWarehouse(tenantId, savedEntity.id, createSkuDto.warehouseId);
+    }
     return this.skuMapper.toResponse(savedEntity);
   }
 
-  async findAll(tenantId: string, query: SkuQueryDto): Promise<{ data: SkuResponseDto[]; total: number }> {
+  async findAll(user: UserResponseDto, query: SkuQueryDto): Promise<{ data: SkuResponseDto[]; total: number }> {
     const qb = this.skuRepository.createQueryBuilder('sku')
-      .where('sku.tenantId = :tenantId', { tenantId });
+      .where('sku.tenantId = :tenantId', { tenantId: user.tenantId });
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      qb.innerJoin(
+        'stock_levels',
+        'sl',
+        'sl.sku_id = sku.id AND sl.warehouse_id = :warehouseId',
+        { warehouseId: user.warehouseId },
+      );
+    } else if (query.warehouseId) {
+      qb.innerJoin(
+        'stock_levels',
+        'sl',
+        'sl.sku_id = sku.id AND sl.warehouse_id = :warehouseId',
+        { warehouseId: query.warehouseId },
+      );
+    }
+
     applySortAndSearch(qb, 'sku', query.sortBy, query.sortOrder, query.search, ['name', 'sku']);
     
     if (query.categoryId) {
@@ -193,6 +227,17 @@ export class SkuService {
     let successful = 0;
     const createdIds: string[] = [];
     if (toCreate.length > 0) {
+      const tenant = await this.tenantsService.findById(tenantId);
+      const limit = tenant.plan?.maxSkus ?? 10000;
+      const currentCount = await this.skuRepository.count({ where: { tenantId } });
+      
+      if (limit !== null && currentCount + toCreate.length > limit) {
+        throw new ConflictException({ 
+          message: `Importing these SKUs would exceed your plan limit of ${limit} SKUs (Current: ${currentCount}, Importing: ${toCreate.length}). Please upgrade your plan.`, 
+          code: 'PLAN_LIMIT_REACHED' 
+        });
+      }
+
       await this.dataSource.transaction(async (manager) => {
         const entities = toCreate.map((dto) => {
           const e = this.skuMapper.toEntity(dto);

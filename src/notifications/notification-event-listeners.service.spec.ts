@@ -135,7 +135,7 @@ describe('NotificationEventListeners', () => {
     it('should include active users in the tenant with the given roles', async () => {
       const users = await (listeners as any).findUsersByRoles('tenant-1', [
         UserRole.SUPER_ADMIN,
-        UserRole.TENANT_OWNER,
+        UserRole.TENANT,
       ]);
 
       expect(mockUserRepo.createQueryBuilder).toHaveBeenCalled();
