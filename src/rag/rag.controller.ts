@@ -9,6 +9,7 @@ import {
 import { successResponse } from '../utils/response.util';
 import { RagService } from './rag.service';
 import { GatewayLlmService } from '../agents/gateway-llm.service';
+import { ToolExecutorService } from '../agents/tool-executor.service';
 import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
 import {
   AskAssistantDto,
@@ -29,6 +30,7 @@ export class RagController {
   constructor(
     private readonly ragService: RagService,
     private readonly gatewayLlm: GatewayLlmService,
+    private readonly toolExecutor: ToolExecutorService,
   ) {}
 
   @Post('ingest')
@@ -85,18 +87,48 @@ export class RagController {
       5,
     );
 
-    // 2. If no chunks found, return early with a canned response
-    if (!chunks || chunks.length === 0) {
+    let contextBlock = chunks
+      .map((chunk, i) => `[Source ${i + 1} — ${chunk.sourceType}]\n${chunk.content}`)
+      .join('\n\n');
+
+    // Inject live inventory data if the user is asking about stockouts or low stock
+    const isInventoryQuery = /stockout|low stock|at risk|reorder|out of stock/i.test(dto.query);
+    let injectedSources: any[] = [];
+    
+    if (isInventoryQuery && user.tenantId) {
+      try {
+        const lowStockData = await this.toolExecutor.execute(user.tenantId, 'get_low_stock_skus', {});
+        if (Array.isArray(lowStockData) && lowStockData.length > 0) {
+          const summary = lowStockData.map((item: any) => 
+            `SKU: ${item.sku?.sku || item.skuId}, Name: ${item.sku?.name || 'Unknown'}, Warehouse: ${item.warehouse?.name || 'Unknown'}, Quantity: ${item.quantity}, Reorder Threshold: ${item.reorderThreshold}`
+          ).join('\n');
+          
+          contextBlock += `\n\n[Source Live Data — current low stock items]\n${summary}`;
+          injectedSources.push({
+            content: 'Live Database: Low Stock SKUs',
+            sourceType: 'LIVE_DATA',
+            score: 1.0,
+          });
+        } else if (Array.isArray(lowStockData) && lowStockData.length === 0) {
+          contextBlock += `\n\n[Source Live Data — current low stock items]\nNo SKUs are currently at risk of stockout.`;
+          injectedSources.push({
+            content: 'Live Database: No low stock SKUs found',
+            sourceType: 'LIVE_DATA',
+            score: 1.0,
+          });
+        }
+      } catch (err) {
+        // Silently ignore if tool execution fails
+      }
+    }
+
+    // 2. If no chunks found and no live data injected, return early with a canned response
+    if ((!chunks || chunks.length === 0) && injectedSources.length === 0) {
       return successResponse({
         answer: NO_CONTEXT_ANSWER,
         sources: [],
       });
     }
-
-    // 3. Build the grounded prompt with retrieved context
-    const contextBlock = chunks
-      .map((chunk, i) => `[Source ${i + 1} — ${chunk.sourceType}]\n${chunk.content}`)
-      .join('\n\n');
 
     const systemPrompt = `${ASSISTANT_SYSTEM_PROMPT}\n\nContext:\n${contextBlock}`;
 
@@ -108,7 +140,7 @@ export class RagController {
       content: chunk.content,
       sourceType: chunk.sourceType,
       score: chunk.score,
-    }));
+    })).concat(injectedSources);
 
     return successResponse({ answer, sources });
   }
