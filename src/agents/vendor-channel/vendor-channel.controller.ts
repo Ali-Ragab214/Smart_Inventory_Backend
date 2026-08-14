@@ -5,9 +5,18 @@ import { VendorEmailService } from './vendor-email.service';
 import { VendorInboundMailService } from './vendor-inbound-mail.service';
 import { VendorChannelService } from './vendor-channel.service';
 
+import { IsEmail, IsOptional, IsString } from 'class-validator';
+
 class TestSendDto {
+  @IsEmail()
   to!: string;
+
+  @IsOptional()
+  @IsString()
   subject?: string;
+
+  @IsOptional()
+  @IsString()
   text?: string;
 }
 
