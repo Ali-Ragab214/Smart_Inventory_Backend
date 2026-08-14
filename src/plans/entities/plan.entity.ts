@@ -22,6 +22,15 @@ export class Plan extends AbstractEntity {
   @Column({ type: 'jsonb', nullable: true })
   features!: string[] | null;
 
+  @Column({ type: 'int', nullable: true })
+  maxUsers!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  maxSkus!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  maxWarehouses!: number | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   stripeProductId!: string | null;
 

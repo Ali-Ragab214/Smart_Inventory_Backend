@@ -24,6 +24,21 @@ export class StripeController {
     }
   }
 
+  @Post('customer-portal')
+  async createCustomerPortalSession(
+    @Body() body: { tenantId: string; returnUrl: string },
+  ) {
+    try {
+      const session = await this.stripeService.createCustomerPortalSession(
+        body.tenantId,
+        body.returnUrl,
+      );
+      return { success: true, data: { url: session.url } };
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : 'Failed to create customer portal session');
+    }
+  }
+
   @Get('billing-info/:tenantId')
   async getBillingInfo(
     @Param('tenantId') tenantId: string,

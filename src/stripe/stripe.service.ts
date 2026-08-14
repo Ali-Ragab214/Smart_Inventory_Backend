@@ -22,24 +22,43 @@ export class StripeService {
     const Stripe = require('stripe');
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY') || 'sk_test_placeholder';
     this.stripe = new Stripe(secretKey, {
-      apiVersion: '2026-07-29.dahlia',
+      apiVersion: '2023-10-16',
     });
   }
 
   async createCheckoutSession(tenantId: string, planId: string, successUrl: string, cancelUrl: string) {
-    const tenant = await this.tenantRepository.findOne({ where: { id: tenantId } });
+    const tenant = await this.tenantRepository.findOne({ where: { id: tenantId }, relations: ['users'] });
     if (!tenant) throw new Error('Tenant not found');
 
     const plan = await this.planRepository.findOne({ where: { id: planId } });
-    if (!plan || plan.price === null) {
+    if (!plan) {
        throw new Error('Invalid plan selected.');
+    }
+
+    if (plan.price === null) {
+      // Enterprise plan selected - redirect to a contact sales page or return a specific url
+      return { url: '/contact-sales' };
+    }
+
+    let customerId = tenant.stripeCustomerId;
+    if (!customerId) {
+      // Create Stripe customer first to ensure webhook matches correctly
+      const ownerEmail = tenant.users && tenant.users.length > 0 ? tenant.users[0].email : undefined;
+      const customer = await this.stripe.customers.create({
+         name: tenant.name,
+         email: ownerEmail,
+         metadata: { tenantId: tenant.id },
+      });
+      customerId = customer.id;
+      tenant.stripeCustomerId = customerId;
+      await this.tenantRepository.save(tenant);
     }
 
     const session = await this.stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'subscription',
-      customer: tenant.stripeCustomerId || undefined, // If they already have a customer ID, use it
-      client_reference_id: tenant.id, // Tie the session back to our tenant
+      customer: customerId,
+      client_reference_id: tenant.id,
       metadata: { planId },
       line_items: [
         {
@@ -49,7 +68,7 @@ export class StripeService {
               name: plan.name,
               description: plan.description || '',
             },
-            unit_amount: Math.round(plan.price * 100), // convert dollars to cents
+            unit_amount: Math.round(plan.price * 100), // Base plan price based on limits
             recurring: {
               interval: 'month',
             },
@@ -91,12 +110,24 @@ export class StripeService {
           const tenant = await this.tenantRepository.findOne({ where: { id: session.client_reference_id } });
           if (tenant) {
             tenant.stripeCustomerId = session.customer as string;
-            tenant.subscriptionStatus = 'active';
+            
+            // If the subscription has a trial, mark it as trialing, otherwise active
+            const subscriptionId = session.subscription as string;
+            let status = 'active';
+            if (subscriptionId) {
+               const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
+               if (subscription.status === 'trialing') {
+                 status = 'trialing';
+                 tenant.trialEndsAt = new Date(subscription.trial_end! * 1000);
+               }
+            }
+            tenant.subscriptionStatus = status;
+            
             if (session.metadata?.planId) {
               tenant.planId = session.metadata.planId;
             }
             await this.tenantRepository.save(tenant);
-            this.logger.log(`Tenant ${tenant.id} subscribed successfully.`);
+            this.logger.log(`Tenant ${tenant.id} subscribed successfully (Status: ${status}).`);
           }
         }
         break;
@@ -121,35 +152,13 @@ export class StripeService {
     const tenant = await this.tenantRepository.findOne({ where: { id: tenantId }, relations: ['plan'] });
     if (!tenant) throw new Error('Tenant not found');
 
-    const defaultMockData = {
-      isMock: true,
-      nextPaymentDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      paymentMethod: {
-        brand: 'mastercard',
-        last4: '3847',
-        expMonth: 12,
-        expYear: 2026,
-      },
-      history: [
-        {
-          id: 'inv_mock1',
-          date: new Date().toISOString(),
-          amount: tenant.plan?.price ? tenant.plan.price * 100 : 9900,
-          status: 'paid',
-          invoicePdf: '#',
-        },
-        {
-          id: 'inv_mock2',
-          date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-          amount: tenant.plan?.price ? tenant.plan.price * 100 : 9900,
-          status: 'paid',
-          invoicePdf: '#',
-        }
-      ]
-    };
-
     if (!tenant.stripeCustomerId) {
-      return defaultMockData;
+      return {
+        isMock: false,
+        nextPaymentDate: null,
+        paymentMethod: null,
+        history: [],
+      };
     }
 
     try {
@@ -160,14 +169,14 @@ export class StripeService {
         limit: 1,
       });
 
-      let nextPaymentDate = defaultMockData.nextPaymentDate;
+      let nextPaymentDate: string | null = null;
       if (subscriptions.data.length > 0) {
         nextPaymentDate = new Date((subscriptions.data[0] as any).current_period_end * 1000).toISOString();
       }
 
       // 2. Fetch the default payment method
       const customer = await this.stripe.customers.retrieve(tenant.stripeCustomerId) as Stripe.Customer;
-      let paymentMethod = defaultMockData.paymentMethod;
+      let paymentMethod: any = null;
       
       if (customer.invoice_settings?.default_payment_method) {
         const pm = await this.stripe.paymentMethods.retrieve(customer.invoice_settings.default_payment_method as string);
@@ -211,12 +220,29 @@ export class StripeService {
         isMock: false,
         nextPaymentDate,
         paymentMethod,
-        history: history.length > 0 ? history : defaultMockData.history,
+        history: history, // Return actual history even if empty
       };
 
     } catch (err) {
-      this.logger.error('Failed to fetch billing portal data from Stripe. Returning mock data.', err);
-      return defaultMockData;
+      this.logger.error('Failed to fetch billing portal data from Stripe.', err);
+      // Remove fake data fallback, throw real error
+      throw new Error('Could not retrieve billing information. Please check your Stripe connection.');
     }
+  }
+
+  async createCustomerPortalSession(tenantId: string, returnUrl: string) {
+    const tenant = await this.tenantRepository.findOne({ where: { id: tenantId } });
+    if (!tenant) throw new Error('Tenant not found');
+
+    if (!tenant.stripeCustomerId) {
+      throw new Error('No Stripe customer associated with this account. Please subscribe first.');
+    }
+
+    const session = await this.stripe.billingPortal.sessions.create({
+      customer: tenant.stripeCustomerId,
+      return_url: returnUrl,
+    });
+
+    return { url: session.url };
   }
 }

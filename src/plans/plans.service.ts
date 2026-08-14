@@ -18,25 +18,28 @@ export class PlansService implements OnModuleInit {
   }
 
   private async seedDefaultPlans() {
-    const count = await this.planRepository.count();
-    if (count > 0) return;
-
     const plans = [
       {
         name: 'Starter',
         description: 'Perfect for small businesses getting started.',
-        price: 29.00,
+        price: 9.00,
         billingCycle: 'monthly',
         isPopular: false,
-        features: ['Up to 500 SKUs', '1 User Account', 'Basic Inventory Tracking', 'Manual Purchase Orders'],
+        features: ['Up to 1,000 SKUs', 'Up to 5 User Accounts', 'Up to 2 Warehouses', 'Basic Inventory Tracking', 'Manual Purchase Orders'],
+        maxUsers: 5,
+        maxSkus: 1000,
+        maxWarehouses: 2,
       },
       {
         name: 'Pro',
         description: 'For growing businesses leveraging AI.',
-        price: 99.00,
+        price: 29.00,
         billingCycle: 'monthly',
         isPopular: true,
-        features: ['Unlimited SKUs', 'Up to 5 User Accounts', 'Advanced AI Demand Forecasting', 'Automated Purchase Orders', 'Priority Support'],
+        features: ['Up to 10,000 SKUs', 'Up to 10 User Accounts', 'Up to 5 Warehouses', 'Advanced AI Forecasting', 'Automated POs'],
+        maxUsers: 10,
+        maxSkus: 10000,
+        maxWarehouses: 5,
       },
       {
         name: 'Enterprise',
@@ -44,12 +47,21 @@ export class PlansService implements OnModuleInit {
         price: null,
         billingCycle: 'monthly',
         isPopular: false,
-        features: ['Dedicated AI Assistant', 'Advanced RAG Analytics', 'Unlimited Users', 'Custom Integrations', '24/7 Phone Support'],
+        features: ['Dedicated AI Assistant', 'Advanced RAG Analytics', 'Unlimited Limits', 'Custom Integrations', '24/7 Phone Support'],
+        maxUsers: null,
+        maxSkus: null,
+        maxWarehouses: null,
       },
     ];
 
-    for (const plan of plans) {
-      await this.planRepository.save(this.planRepository.create(plan));
+    for (const planData of plans) {
+      const existing = await this.planRepository.findOne({ where: { name: planData.name } });
+      if (existing) {
+        Object.assign(existing, planData);
+        await this.planRepository.save(existing);
+      } else {
+        await this.planRepository.save(this.planRepository.create(planData));
+      }
     }
   }
 
