@@ -6,6 +6,8 @@ export const RagEvents = {
   PURCHASE_ORDER_SAVED: 'knowledge.purchaseOrder.saved',
   NEGOTIATION_APPROVED: 'knowledge.negotiation.approved',
   VENDOR_DELETED: 'knowledge.vendor.deleted',
+  WAREHOUSE_SAVED: 'knowledge.warehouse.saved',
+  WAREHOUSE_DELETED: 'knowledge.warehouse.deleted',
 } as const;
 
 export interface VendorCatalogUpsertedEvent {
@@ -52,4 +54,19 @@ export interface VendorDeletedEvent {
   tenantId: string;
   vendorId: string;
   vendorName: string;
+}
+
+export interface WarehouseSavedEvent {
+  tenantId: string;
+  warehouseId: string;
+  warehouseName: string;
+  location: string | null;
+  status: string;
+  isMain: boolean;
+}
+
+export interface WarehouseDeletedEvent {
+  tenantId: string;
+  warehouseId: string;
+  warehouseName: string;
 }

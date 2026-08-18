@@ -9,6 +9,8 @@ import {
   PurchaseOrderSavedEvent,
   NegotiationApprovedEvent,
   VendorDeletedEvent,
+  WarehouseSavedEvent,
+  WarehouseDeletedEvent,
 } from './rag-events';
 
 @Injectable()
@@ -158,6 +160,49 @@ export class RagIngestionListener {
     } catch (err) {
       this.logger.error(
         `Failed to remove vendor chunks for ${event.vendorId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /* ── Warehouses ── */
+
+  @OnEvent(RagEvents.WAREHOUSE_SAVED, { async: true })
+  async onWarehouseSaved(event: WarehouseSavedEvent): Promise<void> {
+    const summary = [
+      `Warehouse ${event.warehouseName}`,
+      `is located in ${event.location || 'an unspecified city'}.`,
+      `Status: ${event.status}.`,
+      event.isMain ? 'This is the main warehouse.' : 'This is not the main warehouse.',
+    ].join(' ');
+
+    try {
+      await this.ragService.upsertForEntity(
+        event.tenantId,
+        'warehouse',
+        event.warehouseId,
+        KnowledgeSourceType.REPORT,
+        summary,
+      );
+      this.logger.log(`Ingested warehouse chunk for ${event.warehouseId} (${event.warehouseName})`);
+    } catch (err) {
+      this.logger.error(
+        `Failed to ingest warehouse ${event.warehouseId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  @OnEvent(RagEvents.WAREHOUSE_DELETED, { async: true })
+  async onWarehouseDeleted(event: WarehouseDeletedEvent): Promise<void> {
+    try {
+      await this.ragService.removeForEntity(
+        event.tenantId,
+        'warehouse',
+        event.warehouseId,
+      );
+      this.logger.log(`Removed warehouse chunk for ${event.warehouseId} (${event.warehouseName})`);
+    } catch (err) {
+      this.logger.error(
+        `Failed to remove warehouse ${event.warehouseId}: ${(err as Error).message}`,
       );
     }
   }

@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Repository } from 'typeorm';
+import { RagEvents } from '../rag/rag-events';
 import { Warehouse } from './entities/warehouse.entity';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
@@ -22,6 +24,7 @@ export class WarehousesService {
     private readonly warehouseMapper: WarehouseMapper,
     private readonly stockLevelsService: StockLevelsService,
     private readonly tenantsService: TenantsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async create(tenantId: string, dto: CreateWarehouseDto): Promise<WarehouseResponseDto> {
@@ -36,6 +39,14 @@ export class WarehousesService {
     warehouse.tenantId = tenantId;
     const saved = await this.warehouseRepository.save(warehouse);
     await this.stockLevelsService.autoInitializeForWarehouse(tenantId, saved.id);
+    this.eventEmitter.emit(RagEvents.WAREHOUSE_SAVED, {
+      tenantId,
+      warehouseId: saved.id,
+      warehouseName: saved.name,
+      location: saved.location,
+      status: saved.status,
+      isMain: saved.isMain,
+    });
     return this.warehouseMapper.toResponse(saved);
   }
 
@@ -74,6 +85,8 @@ export class WarehousesService {
         stockValue: m?.stockValue ?? 0,
         targetValue: m?.targetValue ?? 0,
         coveragePct: m?.coveragePct ?? 0,
+        capacityUsedPct:
+          w.capacityUnits ? Math.min(100, Math.round(((m?.units ?? 0) / w.capacityUnits) * 100)) : 0,
         skuCount: m?.skuCount ?? 0,
         lowStockCount: m?.lowStockCount ?? 0,
         openOrderCount: m?.openOrderCount ?? 0,
@@ -111,6 +124,14 @@ export class WarehousesService {
 
     const updated = this.warehouseMapper.updateEntity(warehouse, dto);
     const saved = await this.warehouseRepository.save(updated);
+    this.eventEmitter.emit(RagEvents.WAREHOUSE_SAVED, {
+      tenantId,
+      warehouseId: saved.id,
+      warehouseName: saved.name,
+      location: saved.location,
+      status: saved.status,
+      isMain: saved.isMain,
+    });
     return this.warehouseMapper.toResponse(saved);
   }
 
@@ -123,6 +144,11 @@ export class WarehousesService {
     
     warehouse.status = WarehouseStatus.INACTIVE;
     await this.warehouseRepository.save(warehouse);
+    this.eventEmitter.emit(RagEvents.WAREHOUSE_DELETED, {
+      tenantId,
+      warehouseId: id,
+      warehouseName: warehouse.name,
+    });
 
     await this.warehouseRepository.manager
       .createQueryBuilder()

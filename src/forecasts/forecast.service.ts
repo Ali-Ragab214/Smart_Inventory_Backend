@@ -129,6 +129,15 @@ export class ForecastService {
       .take(limit)
       .getMany();
   }
+
+  async findAllByTenant(tenantId: string, limit = 30) {
+    return this.forecastRepo
+      .createQueryBuilder('forecast')
+      .where('forecast.tenantId = :tenantId', { tenantId })
+      .orderBy('forecast.periodStart', 'DESC')
+      .take(limit)
+      .getMany();
+  }
 }
 
 type PeriodSpec = { days: number; label: string };

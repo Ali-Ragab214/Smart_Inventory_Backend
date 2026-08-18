@@ -167,7 +167,7 @@ async function bootstrap() {
     idempotencyKey: 'seed-transfer-out-1',
   });
 
-  const m5_anomaly = movementRepo.create({
+  const m5_adjustment = movementRepo.create({
     tenantId: tenant.id,
     skuId: s1.id,
     warehouseId: w1.id,
@@ -175,12 +175,12 @@ async function bootstrap() {
     quantityChange: -10,
     balanceAfter: 3,
     performedByUserId: users[3].id,
-    note: 'Unexplained shrinkage - to trigger Anomaly Agent',
-    idempotencyKey: 'seed-anomaly-1',
+    note: 'Unexplained shrinkage - manual adjustment',
+    idempotencyKey: 'seed-adjustment-1',
     createdAt: new Date()
   });
 
-  await movementRepo.save([m1, m2, m3, m4, m5_anomaly]);
+  await movementRepo.save([m1, m2, m3, m4, m5_adjustment]);
 
   console.log('Seeding completed successfully!');
   await app.close();

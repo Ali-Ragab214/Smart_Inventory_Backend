@@ -60,6 +60,7 @@ export class StripeService {
       customer: customerId,
       client_reference_id: tenant.id,
       metadata: { planId },
+      subscription_data: { metadata: { planId } },
       line_items: [
         {
           price_data: {
@@ -162,16 +163,17 @@ export class StripeService {
     }
 
     try {
-      // 1. Fetch the active subscription
+      // 1. Fetch the customer's most recent subscription (any status)
       const subscriptions = await this.stripe.subscriptions.list({
         customer: tenant.stripeCustomerId,
-        status: 'active',
         limit: 1,
       });
 
       let nextPaymentDate: string | null = null;
       if (subscriptions.data.length > 0) {
-        nextPaymentDate = new Date((subscriptions.data[0] as any).current_period_end * 1000).toISOString();
+        const sub = subscriptions.data[0];
+        nextPaymentDate = new Date((sub as any).current_period_end * 1000).toISOString();
+        await this.syncTenantFromSubscription(tenant, sub);
       }
 
       // 2. Fetch the default payment method
@@ -227,6 +229,44 @@ export class StripeService {
       this.logger.error('Failed to fetch billing portal data from Stripe.', err);
       // Remove fake data fallback, throw real error
       throw new Error('Could not retrieve billing information. Please check your Stripe connection.');
+    }
+  }
+
+  private async syncTenantFromSubscription(tenant: Tenant, sub: Stripe.Subscription) {
+    const statuses: Record<string, string> = {
+      active: 'active',
+      trialing: 'trialing',
+      past_due: 'past_due',
+      unpaid: 'unpaid',
+      canceled: 'canceled',
+    };
+    const mapped = statuses[sub.status];
+    let changed = false;
+
+    if (mapped && tenant.subscriptionStatus !== mapped) {
+      tenant.subscriptionStatus = mapped;
+      changed = true;
+    }
+
+    if (sub.metadata?.planId && tenant.planId !== sub.metadata.planId) {
+      tenant.planId = sub.metadata.planId;
+      changed = true;
+    }
+
+    if (sub.status === 'trialing' && sub.trial_end) {
+      const endsAt = new Date(sub.trial_end * 1000);
+      if (!tenant.trialEndsAt || tenant.trialEndsAt.getTime() !== endsAt.getTime()) {
+        tenant.trialEndsAt = endsAt;
+        changed = true;
+      }
+    } else if (sub.status === 'active' && tenant.trialEndsAt) {
+      tenant.trialEndsAt = null;
+      changed = true;
+    }
+
+    if (changed) {
+      await this.tenantRepository.save(tenant);
+      this.logger.log(`Tenant ${tenant.id} billing state synced from Stripe (status: ${tenant.subscriptionStatus}).`);
     }
   }
 

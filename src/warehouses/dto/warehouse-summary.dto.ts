@@ -15,6 +15,9 @@ export class WarehouseSummaryDto extends WarehouseResponseDto {
   coveragePct!: number;
 
   @ApiProperty()
+  capacityUsedPct!: number;
+
+  @ApiProperty()
   skuCount!: number;
 
   @ApiProperty()

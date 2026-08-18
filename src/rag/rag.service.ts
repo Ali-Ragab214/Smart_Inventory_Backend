@@ -243,7 +243,7 @@ export class RagService implements OnModuleInit {
       score: number;
     }>;
 
-    return rows
+    const results = rows
       .map((row) => {
         const rawScore = typeof row.score === 'number' ? row.score : parseFloat(row.score);
         const ageDays = Math.max(
@@ -260,6 +260,96 @@ export class RagService implements OnModuleInit {
         };
       })
       .filter((row) => row.score >= MIN_SCORE_THRESHOLD);
+
+    if (results.length < topK) {
+      const missing = topK - results.length;
+      const fallback = await this.keywordFallback(trimmed, filters, missing);
+      const seen = new Set(results.map((r) => r.id));
+      results.push(...fallback.filter((r) => !seen.has(r.id)));
+    }
+    return results;
+  }
+
+  private readonly STOPWORDS = new Set([
+    'give', 'me', 'all', 'the', 'in', 'a', 'an', 'of', 'and', 'or', 'to',
+    'for', 'what', 'which', 'list', 'show', 'only', 'are', 'is', 'at',
+    'with', 'from', 'on', 'how', 'many', 'do', 'we', 'have', 'stored',
+    'warehouse', 'inventory', 'located', 'there', 'any', 'items', 'item',
+    'sku', 'skus', 'can', 'you', 'tell', 'please', 'want', 'get', 'info',
+    'information', 'about', 'than', 'out', 'when', 'where', 'was', 'were',
+  ]);
+
+  /**
+   * Keyword fallback (ILIKE) for queries whose embedding similarity is too
+   * weak (nicknames, city names, typos). Ranks by number of matched terms so
+   * entity/city mentions still surface the right chunk.
+   */
+  private async keywordFallback(
+    query: string,
+    filters: SearchFilter,
+    limit: number,
+  ): Promise<SearchResult[]> {
+    const tokens = query.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+    const keywords = [...new Set(tokens.filter((t) => t.length >= 3 && !this.STOPWORDS.has(t)))];
+    if (keywords.length === 0 || limit <= 0) return [];
+
+    const params: unknown[] = [];
+    const like: string[] = [];
+    for (const kw of keywords) {
+      params.push(`%${kw}%`);
+      like.push(`content ILIKE $${params.length}`);
+    }
+
+    const conditions: string[] = [`(${like.join(' OR ')})`];
+    if (filters.tenantId) {
+      params.push(filters.tenantId);
+      conditions.push(`("tenantId" = $${params.length} OR "tenantId" IS NULL)`);
+    }
+    if (filters.vendorId) {
+      params.push(filters.vendorId);
+      conditions.push(`"vendorId" = $${params.length}`);
+    }
+    if (filters.sourceType) {
+      params.push(filters.sourceType);
+      conditions.push(`"sourceType" = $${params.length}`);
+    }
+    params.push(limit);
+
+    const matchCount = like.map((_, i) => `(content ILIKE $${i + 1})::int`).join(' + ');
+    const sql = `
+      SELECT id, content, "sourceType", "vendorId", "createdAt",
+             LEAST(0.9, 0.45 + 0.15 * (${matchCount})) AS score
+      FROM knowledge_chunks
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY ${matchCount} DESC, "createdAt" DESC
+      LIMIT $${params.length}
+    `;
+
+    const now = Date.now();
+    const rows = (await this.dataSource.query(sql, params)) as Array<{
+      id: string;
+      content: string;
+      sourceType: string;
+      vendorId: string;
+      createdAt: string;
+      score: number;
+    }>;
+
+    return rows.map((row) => {
+      const rawScore = typeof row.score === 'number' ? row.score : parseFloat(row.score);
+      const ageDays = Math.max(
+        0,
+        Math.round((now - new Date(row.createdAt).getTime()) / 86_400_000),
+      );
+      return {
+        id: row.id,
+        content: row.content,
+        sourceType: row.sourceType,
+        vendorId: row.vendorId,
+        score: rawScore * freshnessDecay(ageDays),
+        ageDays,
+      };
+    });
   }
 
   /**

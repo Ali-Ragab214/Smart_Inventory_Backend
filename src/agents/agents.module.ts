@@ -35,6 +35,8 @@ import { VendorNegotiationProfile } from './entities/vendor-negotiation-profile.
 import { RagModule } from '../rag/rag.module';
 import { PurchaseOrdersModule } from '../purchase-orders/purchase-orders.module';
 import { ForecastsModule } from '../forecasts/forecasts.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { UsersModule } from '../users/users.module';
 import { ForecastSchedulerService } from '../forecasts/forecast-scheduler.service';
 import { ForecastController } from '../forecasts/forecast.controller';
 import { Sku } from '../sku/entities/sku.entity';
@@ -49,6 +51,8 @@ import { StockMovement } from '../inventory/stock-movements/entities/stock-movem
     RagModule,
     PurchaseOrdersModule,
     ForecastsModule,
+    NotificationsModule,
+    UsersModule,
   ],
   controllers: [ApprovalQueueController, AgentRunController, ForecastController, VendorChannelController],
   providers: [

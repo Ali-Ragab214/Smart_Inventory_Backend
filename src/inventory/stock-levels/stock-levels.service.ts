@@ -19,6 +19,7 @@ export interface WarehouseMetrics {
   units: number;
   stockValue: number;
   targetValue: number;
+  coverageValue: number;
   coveragePct: number;
   skuCount: number;
   lowStockCount: number;
@@ -53,8 +54,8 @@ export class StockLevelsService {
   ): Promise<{ data: StockLevelResponseDto[]; total: number }> {
     const qb = this.stockLevelRepo
       .createQueryBuilder('sl')
-      .leftJoinAndSelect('sl.sku', 'sku')
-      .leftJoinAndSelect('sl.warehouse', 'warehouse')
+      .innerJoinAndSelect('sl.sku', 'sku')
+      .innerJoinAndSelect('sl.warehouse', 'warehouse')
       .where('sl.warehouseId = :warehouseId', { warehouseId })
       .andWhere('sl.tenantId = :tenantId', { tenantId })
       .orderBy('sl.createdAt', 'DESC');
@@ -70,8 +71,8 @@ export class StockLevelsService {
   async findLowStock(tenantId: string): Promise<StockLevelResponseDto[]> {
     const levels = await this.stockLevelRepo
       .createQueryBuilder('sl')
-      .leftJoinAndSelect('sl.sku', 'sku')
-      .leftJoinAndSelect('sl.warehouse', 'warehouse')
+      .innerJoinAndSelect('sl.sku', 'sku')
+      .innerJoinAndSelect('sl.warehouse', 'warehouse')
       .where('sl.tenantId = :tenantId', { tenantId })
       .andWhere('sl.quantity <= sl.reorderThreshold')
       .orderBy('sl.quantity', 'ASC')
@@ -83,8 +84,8 @@ export class StockLevelsService {
   async findAll(tenantId: string, query: StockLevelQueryDto): Promise<{ data: StockLevelResponseDto[]; total: number }> {
     const qb = this.stockLevelRepo
       .createQueryBuilder('sl')
-      .leftJoinAndSelect('sl.sku', 'sku')
-      .leftJoinAndSelect('sl.warehouse', 'warehouse')
+      .innerJoinAndSelect('sl.sku', 'sku')
+      .innerJoinAndSelect('sl.warehouse', 'warehouse')
       .where('sl.tenantId = :tenantId', { tenantId })
       .orderBy('sl.createdAt', 'DESC');
 
@@ -102,8 +103,8 @@ export class StockLevelsService {
   async findLowStockByWarehouse(tenantId: string, warehouseId: string): Promise<StockLevelResponseDto[]> {
     const levels = await this.stockLevelRepo
       .createQueryBuilder('sl')
-      .leftJoinAndSelect('sl.sku', 'sku')
-      .leftJoinAndSelect('sl.warehouse', 'warehouse')
+      .innerJoinAndSelect('sl.sku', 'sku')
+      .innerJoinAndSelect('sl.warehouse', 'warehouse')
       .where('sl.warehouseId = :warehouseId', { warehouseId })
       .andWhere('sl.tenantId = :tenantId', { tenantId })
       .andWhere('sl.quantity <= sl.reorderThreshold')
@@ -116,8 +117,8 @@ export class StockLevelsService {
   async findLowStockForUser(user: User): Promise<StockLevelResponseDto[]> {
     const qb = this.stockLevelRepo
       .createQueryBuilder('sl')
-      .leftJoinAndSelect('sl.sku', 'sku')
-      .leftJoinAndSelect('sl.warehouse', 'warehouse')
+      .innerJoinAndSelect('sl.sku', 'sku')
+      .innerJoinAndSelect('sl.warehouse', 'warehouse')
       .where('sl.quantity <= sl.reorderThreshold')
       .orderBy('sl.quantity', 'ASC');
 
@@ -160,6 +161,7 @@ export class StockLevelsService {
           units: 0,
           stockValue: 0,
           targetValue: 0,
+          coverageValue: 0,
           coveragePct: 0,
           skuCount: 0,
           lowStockCount: 0,
@@ -174,10 +176,12 @@ export class StockLevelsService {
 
     for (const sl of levels) {
       const price = sl.sku?.price ?? 0;
+      const target = sl.reorderThreshold + (sl.safetyStock ?? 0);
       const m = seed(sl.warehouseId);
       m.units += sl.quantity;
       m.stockValue += sl.quantity * price;
-      m.targetValue += (sl.reorderThreshold + (sl.safetyStock ?? 0)) * price;
+      m.targetValue += target * price;
+      m.coverageValue += Math.min(sl.quantity, target) * price;
       m.skuCount += 1;
       if (sl.quantity <= sl.reorderThreshold) {
         m.lowStockCount += 1;
@@ -226,7 +230,9 @@ export class StockLevelsService {
 
     const list = [...map.values()];
     for (const m of list) {
-      m.coveragePct = m.targetValue > 0 ? Math.round((m.stockValue / m.targetValue) * 100) : m.units > 0 ? 100 : 0;
+      // Coverage is capped at 100%: each SKU contributes at most its target value,
+      // so excess stock never inflates the reported percentage.
+      m.coveragePct = m.targetValue > 0 ? Math.round((m.coverageValue / m.targetValue) * 100) : m.units > 0 ? 100 : 0;
     }
     return list;
   }
@@ -438,6 +444,7 @@ export class StockLevelsService {
     dto.skuName = stockLevel.sku?.name ?? '';
     dto.warehouseId = stockLevel.warehouseId;
     dto.warehouseName = stockLevel.warehouse?.name ?? '';
+    dto.warehouseLocation = stockLevel.warehouse?.location ?? '';
     dto.quantity = stockLevel.quantity;
     dto.reorderThreshold = stockLevel.reorderThreshold;
     dto.safetyStock = stockLevel.safetyStock;
