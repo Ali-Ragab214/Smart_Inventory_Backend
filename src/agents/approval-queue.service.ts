@@ -146,20 +146,61 @@ export class ApprovalQueueService {
         // configured vendor channel (real email when enabled, else simulated).
         await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'sent');
         const payload = (saved.payload ?? {}) as Record<string, unknown>;
-        const offeredDiscount = Number(payload.requestedDiscountPercent ?? payload.finalDiscountPercent ?? 0);
+        const offeredDiscount = Number(payload.finalDiscountPercent ?? payload.final ?? payload.requestedDiscountPercent ?? 0);
         const paymentTermsDays = Math.max(30, Math.round(Number(payload.paymentTermsDays) || 30));
         const shippingCost = Math.max(0, Number(payload.shippingCost) || 50);
+        // The drafted prose and the structured numbers can disagree (the LLM
+        // writes both independently). Stamp the real values into the text so
+        // the vendor reads exactly what the system will hold them to.
+        const deliveredText = stampOfferIntoText(
+          String(payload.emailContent ?? ''),
+          { discountPercent: offeredDiscount, paymentTermsDays, shippingCost },
+        );
         await this.vendorChannelService.dispatchOffer(
           tenantId,
           saved.id,
           saved.agentRunId,
           { discountPercent: offeredDiscount, paymentTermsDays, shippingCost },
-          payload,
+          { ...payload, emailContent: deliveredText },
         );
       }
     }
 
     return { ...this.mapper.toResponse(saved), createdPoIds };
+  }
+
+  /**
+   * Persist draft edits (editedPayload) on a pending approval request so the
+   * approval UI and downstream steps read the updated values (discount, terms, ...).
+   */
+  async editDraft(
+    user: UserResponseDto,
+    id: string,
+    editedPayload: object,
+  ): Promise<ApprovalRequestResponseDto> {
+    const tenantId = user.tenantId!;
+    const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
+    if (!approval) {
+      throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
+    }
+    if (approval.status !== 'pending') {
+      throw new BadRequestException({ message: 'Only pending approval requests can be edited.', code: 'APPROVAL_NOT_EDITABLE' });
+    }
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      const payloadStr = JSON.stringify(approval.payload);
+      if (!payloadStr.includes(user.warehouseId)) {
+        throw new ForbiddenException({ message: 'You do not have permission to edit this request.', code: 'FORBIDDEN' });
+      }
+    }
+
+    approval.payload = {
+      ...(approval.payload as Record<string, unknown>),
+      ...(editedPayload as Record<string, unknown>),
+    };
+    const saved = await this.approvalRepo.save(approval);
+    this.logger.log(`Draft payload updated for approval ${id}.`);
+    return this.mapper.toResponse(saved);
   }
 
   private async finalizeReorderPo(
@@ -229,8 +270,11 @@ export class ApprovalQueueService {
   ): Promise<string[]> {
     const payload = (approval.payload ?? {}) as Record<string, unknown>;
     const vendorId = (payload.vendorId as string | undefined) ?? undefined;
-    const finalDiscount = Number(
-      payload.finalDiscountPercent ?? payload.final ?? payload.requestedDiscountPercent ?? 0,
+    const finalDiscount = Math.max(
+      0,
+      Math.min(100, Number(
+        payload.finalDiscountPercent ?? payload.final ?? payload.requestedDiscountPercent ?? 0,
+      )),
     );
     const createdPoIds: string[] = [];
 
@@ -240,10 +284,13 @@ export class ApprovalQueueService {
     }
 
     const run = await this.agentRunService.loadEntity(tenantId, approval.agentRunId);
-    let items: Array<Record<string, unknown>> =
-      (run?.negotiationItems as Array<Record<string, unknown>> | undefined) ??
-      (Array.isArray(payload.items) ? (payload.items as Array<Record<string, unknown>>) : []) ??
-      [];
+    let items: Array<Record<string, unknown>> = Array.isArray(payload.items)
+      ? (payload.items as Array<Record<string, unknown>>)
+      : [];
+    if (items.length === 0) {
+      items =
+        (run?.negotiationItems as Array<Record<string, unknown>> | undefined) ?? [];
+    }
 
     // Fallback: load items from the original reorder approval via contextRunId
     if (items.length === 0 && run?.contextRunId) {
@@ -283,7 +330,7 @@ export class ApprovalQueueService {
             Math.round(basePrice * (1 - finalDiscount / 100) * 10000) / 10000;
           return {
             skuId: String(item.skuId ?? ''),
-            quantity: Math.max(1, Math.round(Number(item.recommendedQuantity) || 1)),
+            quantity: Math.max(1, Math.round(Number(item.recommendedQuantity ?? item.quantity) || 1)),
             unitPrice,
           };
         })
@@ -404,4 +451,28 @@ export class ApprovalQueueService {
 
     return this.mapper.toResponse(saved);
   }
+}
+
+/**
+ * Align the prose numbers in a drafted offer email with the structured offer
+ * values the system actually uses, so a vendor never reads a "12%" that the
+ * system holds as "10%". Order matters: terms first, then the discount so a
+ * stray "net 35" cannot swallow the percentage token, and shipping only when
+ * a dollar figure sits next to a shipping mention.
+ */
+export function stampOfferIntoText(
+  text: string,
+  offer: { discountPercent: number; paymentTermsDays: number; shippingCost: number },
+): string {
+  if (!text) return text;
+  const { discountPercent, paymentTermsDays, shippingCost } = offer;
+  let out = text.replace(/net[\s-]?\d{1,3}(?:\s*days?)?/i, `net ${paymentTermsDays} days`);
+  out = out.replace(/(\d{1,3}(?:\.\d+)?)\s*%/, `${discountPercent}%`);
+  if (shippingCost > 0) {
+    out = out.replace(
+      /\$\s?\d{1,3}(?:\.\d+)?(?=\D{0,20}(?:shipping|freight|delivery))/i,
+      `$${shippingCost}`,
+    );
+  }
+  return out;
 }

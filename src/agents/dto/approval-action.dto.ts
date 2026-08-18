@@ -25,3 +25,10 @@ export class NegotiateApprovalRequestDto {
   @IsUUID()
   reviewedBy!: string;
 }
+
+export class EditApprovalRequestDto {
+  @ApiProperty({ type: Object })
+  @IsObject()
+  @Type(() => Object)
+  editedPayload!: object;
+}

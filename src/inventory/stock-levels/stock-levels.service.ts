@@ -175,7 +175,8 @@ export class StockLevelsService {
     };
 
     for (const sl of levels) {
-      const price = sl.sku?.price ?? 0;
+      if (!sl.sku || sl.sku.deletedAt) continue;
+      const price = sl.sku.price;
       const target = sl.reorderThreshold + (sl.safetyStock ?? 0);
       const m = seed(sl.warehouseId);
       m.units += sl.quantity;

@@ -20,7 +20,7 @@ import {
 import { ApprovalQueueService } from './approval-queue.service';
 import { paginatedResponse, successResponse } from '../utils/response.util';
 import { ApprovalQueryDto } from './dto/approval-query.dto';
-import { ApproveApprovalRequestDto, NegotiateApprovalRequestDto, RejectApprovalRequestDto } from './dto/approval-action.dto';
+import { ApproveApprovalRequestDto, EditApprovalRequestDto, NegotiateApprovalRequestDto, RejectApprovalRequestDto } from './dto/approval-action.dto';
 import { ApprovalRequestResponseDto } from './dto/approval-request-response.dto';
 import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
@@ -51,6 +51,21 @@ export class ApprovalQueueController {
     @CurrentUser() user: UserResponseDto,
   ) {
     const data = await this.service.approve(user, id, body.reviewedBy, body.editedPayload);
+    return successResponse(data);
+  }
+
+  @Post(':id/edit')
+  @ApiOperation({ summary: 'Persist draft edits on a pending approval request' })
+  @ApiParam({ name: 'id', description: 'Approval request UUID' })
+  @ApiBody({ type: EditApprovalRequestDto })
+  @ApiOkResponse({ type: ApprovalRequestResponseDto })
+  @ApiBadRequestResponse({ description: 'Invalid request body' })
+  async edit(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: EditApprovalRequestDto,
+    @CurrentUser() user: UserResponseDto,
+  ) {
+    const data = await this.service.editDraft(user, id, body.editedPayload);
     return successResponse(data);
   }
 

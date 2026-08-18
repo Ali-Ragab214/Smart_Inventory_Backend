@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { parse } from 'csv-parse/sync';
 import { Sku } from './entities/sku.entity';
+import { StockLevel } from '../inventory/stock-levels/entities/stock-level.entity';
 import { CreateSkuDto } from './dto/create-sku.dto';
 import { UpdateSkuDto } from './dto/update-sku.dto';
 import { SkuResponseDto } from './dto/sku-response.dto';
@@ -117,7 +118,10 @@ export class SkuService {
     if (!skuEntity) {
       throw new NotFoundException({ message: 'The specified product (SKU) does not exist.', code: 'SKU_NOT_FOUND' });
     }
-    await this.skuRepository.softRemove(skuEntity);
+    await this.dataSource.transaction(async (manager) => {
+      await manager.softDelete(Sku, { id, tenantId });
+      await manager.softDelete(StockLevel, { skuId: id, tenantId });
+    });
   }
 
   async importCsv(tenantId: string, buffer: Buffer): Promise<CsvImportResponseDto> {

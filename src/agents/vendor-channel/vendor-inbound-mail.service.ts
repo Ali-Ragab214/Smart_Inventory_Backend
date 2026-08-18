@@ -278,7 +278,7 @@ export class VendorInboundMailService {
       return {
         discountPercent: Math.max(
           0,
-          Number(payload.requestedDiscountPercent ?? payload.finalDiscountPercent ?? 0),
+          Number(payload.finalDiscountPercent ?? payload.final ?? payload.requestedDiscountPercent ?? 0),
         ),
         paymentTermsDays: Math.max(30, Math.round(Number(payload.paymentTermsDays) || 30)),
         shippingCost: Math.max(0, Number(payload.shippingCost) || 50),
