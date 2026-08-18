@@ -44,4 +44,8 @@ export class CreateSkuDto {
   @IsUUID()
   @IsOptional()
   preferredVendorId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  warehouseId?: string;
 }

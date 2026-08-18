@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { VendorTier } from '../entities/vendor.entity';
 
 export class VendorResponseDto {
   @ApiProperty()
@@ -12,6 +13,9 @@ export class VendorResponseDto {
 
   @ApiProperty({ nullable: true })
   contactPhone!: string | null;
+
+  @ApiProperty({ enum: VendorTier, example: VendorTier.TIER_2 })
+  tier!: VendorTier;
 
   @ApiProperty()
   createdAt!: Date;

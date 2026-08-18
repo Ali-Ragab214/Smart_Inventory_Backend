@@ -29,6 +29,16 @@ export class PurchaseOrder extends AbstractTenantEntity {
   @Column('uuid', { nullable: true })
   negotiationRunId!: string | null;
 
+  @Index('idx_purchase_orders_approval')
+  @Column({ name: 'approval_request_id', type: 'uuid', nullable: true })
+  approvalRequestId!: string | null;
+
   @OneToMany(() => PurchaseOrderLineItem, (lineItem) => lineItem.purchaseOrder, { cascade: true })
   lineItems!: PurchaseOrderLineItem[];
+
+  @Column({ name: 'receipt_rating', type: 'int', nullable: true })
+  receiptRating!: number | null;
+
+  @Column({ name: 'damaged_units', type: 'int', nullable: true })
+  damagedUnits!: number | null;
 }

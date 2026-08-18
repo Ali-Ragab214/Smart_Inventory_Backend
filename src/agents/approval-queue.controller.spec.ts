@@ -8,7 +8,7 @@ describe('ApprovalQueueController', () => {
   let service: ApprovalQueueService;
 
   const mockService = {
-    findPending: jest.fn(),
+    findAll: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -35,13 +35,13 @@ describe('ApprovalQueueController', () => {
         { id: 'ar-1', type: 'agent_request', status: 'pending', description: 'reorder agent step 2', createdAt: new Date() },
         { id: 'po-1', type: 'purchase_order', status: 'pending_approval', description: 'Purchase Order', createdAt: new Date() },
       ];
-      mockService.findPending.mockResolvedValue({ data: mockData, total: 2 });
+      mockService.findAll.mockResolvedValue({ data: mockData, total: 2 });
 
       const query: ApprovalQueryDto = { page: 1, limit: 10 };
       const mockUser = { id: 'u1', tenantId: 'tenant-1' } as any;
       const result = await controller.findAll(query, mockUser);
 
-      expect(mockService.findPending).toHaveBeenCalledWith('tenant-1', query);
+      expect(mockService.findAll).toHaveBeenCalledWith('tenant-1', query);
       expect(result).toEqual({
         success: true,
         data: mockData,

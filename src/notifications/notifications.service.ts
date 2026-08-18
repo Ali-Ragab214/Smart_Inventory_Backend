@@ -6,6 +6,7 @@ import { NotificationMapper } from './mappers/notification.mapper';
 import { NotificationQueryDto } from './dto/notification-query.dto';
 import { NotificationResponseDto } from './dto/notification-response.dto';
 import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserRole } from '../users/entities/user.entity';
 import { paginate } from '../utils/pagination.util';
 
 @Injectable()
@@ -25,8 +26,15 @@ export class NotificationsService {
       .where('n.tenantId = :tenantId', { tenantId: user.tenantId })
       .andWhere('(n.userId IS NULL OR n.userId = :userId)', {
         userId: user.id,
-      })
-      .orderBy('n.createdAt', 'DESC');
+      });
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      qb.andWhere('(n.warehouseId IS NULL OR n.warehouseId = :userWarehouseId)', {
+        userWarehouseId: user.warehouseId,
+      });
+    }
+
+    qb.orderBy('n.createdAt', 'DESC');
 
     if (query.type) {
       qb.andWhere('n.type = :type', { type: query.type });
@@ -53,7 +61,11 @@ export class NotificationsService {
         userId: user.id,
       });
 
-    if (user.warehouseId) {
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      qb.andWhere('(n.warehouseId IS NULL OR n.warehouseId = :userWarehouseId)', {
+        userWarehouseId: user.warehouseId,
+      });
+    } else if (user.warehouseId) {
       qb.andWhere('(n.warehouseId IS NULL OR n.warehouseId = :warehouseId)', {
         warehouseId: user.warehouseId,
       });
@@ -63,12 +75,19 @@ export class NotificationsService {
   }
 
   async findOne(user: UserResponseDto, id: string): Promise<NotificationResponseDto> {
-    const notification = await this.notificationRepo
+    const qb = this.notificationRepo
       .createQueryBuilder('n')
       .where('n.id = :id', { id })
       .andWhere('n.tenantId = :tenantId', { tenantId: user.tenantId })
-      .andWhere('(n.userId IS NULL OR n.userId = :userId)', { userId: user.id })
-      .getOne();
+      .andWhere('(n.userId IS NULL OR n.userId = :userId)', { userId: user.id });
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      qb.andWhere('(n.warehouseId IS NULL OR n.warehouseId = :userWarehouseId)', {
+        userWarehouseId: user.warehouseId,
+      });
+    }
+
+    const notification = await qb.getOne();
     if (!notification) {
       throw new NotFoundException({
         message: "We couldn't find this notification.",
@@ -79,12 +98,19 @@ export class NotificationsService {
   }
 
   async markAsRead(user: UserResponseDto, id: string): Promise<NotificationResponseDto> {
-    const notification = await this.notificationRepo
+    const qb = this.notificationRepo
       .createQueryBuilder('n')
       .where('n.id = :id', { id })
       .andWhere('n.tenantId = :tenantId', { tenantId: user.tenantId })
-      .andWhere('(n.userId IS NULL OR n.userId = :userId)', { userId: user.id })
-      .getOne();
+      .andWhere('(n.userId IS NULL OR n.userId = :userId)', { userId: user.id });
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      qb.andWhere('(n.warehouseId IS NULL OR n.warehouseId = :userWarehouseId)', {
+        userWarehouseId: user.warehouseId,
+      });
+    }
+
+    const notification = await qb.getOne();
     if (!notification) {
       throw new NotFoundException({
         message: "We couldn't find this notification.",
@@ -102,14 +128,21 @@ export class NotificationsService {
   }
 
   async markAllAsRead(user: UserResponseDto): Promise<{ updated: number }> {
-    const result = await this.notificationRepo
+    const qb = this.notificationRepo
       .createQueryBuilder()
       .update(Notification)
       .set({ isRead: true, readAt: new Date() })
       .where('tenantId = :tenantId', { tenantId: user.tenantId })
       .andWhere('isRead = :isRead', { isRead: false })
-      .andWhere('(userId IS NULL OR userId = :userId)', { userId: user.id })
-      .execute();
+      .andWhere('(userId IS NULL OR userId = :userId)', { userId: user.id });
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      qb.andWhere('(warehouseId IS NULL OR warehouseId = :userWarehouseId)', {
+        userWarehouseId: user.warehouseId,
+      });
+    }
+
+    const result = await qb.execute();
 
     return { updated: result.affected ?? 0 };
   }

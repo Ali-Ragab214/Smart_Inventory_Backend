@@ -16,10 +16,14 @@ import { AgentRunDetailsResponseDto } from './dto/agent-run-details-response.dto
 import { AgentRunResponseDto } from './dto/agent-run-response.dto';
 import { AgentStepResponseDto } from './dto/agent-step-response.dto';
 
-export type AgentType = 'forecasting' | 'reorder' | 'negotiation' | 'anomaly';
+export type AgentType = 'forecasting' | 'reorder' | 'negotiation' | 'feedback';
 export type AgentRunStatus =
   | 'in_progress'
   | 'awaiting_approval'
+  | 'sent'
+  | 'awaiting_vendor_response'
+  | 'evaluating_counteroffer'
+  | 'finalizing'
   | 'completed'
   | 'rejected'
   | 'escalated';
@@ -28,18 +32,24 @@ export type AgentRunRelatedInput = {
   skuIds?: string[];
   vendorId?: string;
   poId?: string;
+  contextRunId?: string;
+  negotiationItems?: Array<Record<string, unknown>>;
 };
 
 const VALID_AGENT_TYPES: AgentType[] = [
   'forecasting',
   'reorder',
   'negotiation',
-  'anomaly',
+  'feedback',
 ];
 
 const VALID_STATUSES: AgentRunStatus[] = [
   'in_progress',
   'awaiting_approval',
+  'sent',
+  'awaiting_vendor_response',
+  'evaluating_counteroffer',
+  'finalizing',
   'completed',
   'rejected',
   'escalated',
@@ -70,18 +80,45 @@ export class AgentRunService {
       skus: related.skuIds?.map(id => ({ id } as any)) ?? [],
       relatedVendorId: related.vendorId ?? null,
       relatedPoId: related.poId ?? null,
+      contextRunId: related.contextRunId ?? null,
+      roundNumber: 1,
+      maxRounds: 3,
+      negotiationItems: related.negotiationItems ?? null,
     });
 
     const saved = await this.runRepository.save(run);
     return successResponse(this.mapper.toRunResponse(saved));
   }
 
-  async enqueue(runId: string, agentType: AgentType): Promise<void> {
-    await this.agentQueue.add('run-agent-step', { runId, agentType });
+  async enqueue(
+    tenantId: string,
+    runId: string,
+    agentType: AgentType,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    await this.agentQueue.add('run-agent-step', {
+      tenantId,
+      runId,
+      agentType,
+      ...extra,
+    });
+  }
+
+  async advanceRound(tenantId: string, runId: string): Promise<number> {
+    const run = await this.runRepository.findOne({ where: { id: runId, tenantId } });
+    if (!run) {
+      throw new NotFoundException({ message: 'The requested agent run could not be found.', code: 'AGENT_RUN_NOT_FOUND' });
+    }
+    run.roundNumber += 1;
+    const saved = await this.runRepository.save(run);
+    return saved.roundNumber;
   }
 
   async load(tenantId: string, runId: string) {
-    const run = await this.runRepository.findOne({ where: { id: runId, tenantId } });
+    const run = await this.runRepository.findOne({
+      where: { id: runId, tenantId },
+      relations: ['skus'],
+    });
     if (!run) {
       throw new NotFoundException({ message: 'The requested agent run could not be found.', code: 'AGENT_RUN_NOT_FOUND' });
     }
@@ -146,6 +183,10 @@ export class AgentRunService {
     run.status = status;
     const saved = await this.runRepository.save(run);
     return successResponse(this.mapper.toRunResponse(saved));
+  }
+
+  async loadEntity(tenantId: string, runId: string): Promise<AgentRun | null> {
+    return this.runRepository.findOne({ where: { id: runId, tenantId } });
   }
 
   async findRecent(tenantId: string, limit = 20) {

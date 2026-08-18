@@ -13,4 +13,8 @@ export class SkuQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   categoryId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
 }

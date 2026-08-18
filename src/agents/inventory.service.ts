@@ -15,6 +15,16 @@ export class InventoryService {
     return this.skuService.findOne(tenantId, skuId);
   }
 
+  async findAllSkus(tenantId: string) {
+    const { data } = await this.skuService.findAll({ tenantId } as any, { page: 1, limit: 50 });
+    return data;
+  }
+
+  async findAllStockLevels(tenantId: string) {
+    const { data } = await this.stockLevelsService.findAll(tenantId, { page: 1, limit: 100 });
+    return data;
+  }
+
   async findLowStock(tenantId: string) {
     return this.stockLevelsService.findLowStock(tenantId);
   }

@@ -11,10 +11,10 @@ import {
   NotificationType,
 } from './entities/notification.entity';
 import { ApprovalRequestedEvent } from './events/approval-requested.event';
-import { AnomalyFlaggedEvent } from './events/anomaly-flagged.event';
 import { LowStockDetectedEvent } from './events/low-stock-detected.event';
 import { NotificationEvents } from './events/notification-events';
 import { PoReceivedEvent } from './events/po-received.event';
+import { PoCreatedEvent } from './events/po-created.event';
 import { VendorRespondedEvent } from './events/vendor-responded.event';
 import { NotificationMapper } from './mappers/notification.mapper';
 import { NotificationsGateway } from './notifications.gateway';
@@ -61,36 +61,10 @@ export class NotificationEventListeners {
 
     const recipients = await this.findUsersByRoles(event.tenantId, [
       UserRole.SUPER_ADMIN,
-      UserRole.TENANT_OWNER,
+      UserRole.TENANT,
       UserRole.WAREHOUSE_MANAGER,
     ]);
     await this.emailService.sendApprovalRequired(recipients, payload);
-  }
-
-  @OnEvent(NotificationEvents.ANOMALY_FLAGGED, { async: true })
-  async handleAnomalyFlagged(event: AnomalyFlaggedEvent): Promise<void> {
-    const { payload } = event;
-    const notification = await this.persist({
-      tenantId: event.tenantId,
-      type: NotificationType.ANOMALY_FLAGGED,
-      severity: NotificationSeverity.CRITICAL,
-      title: 'Inventory anomaly flagged',
-      message: payload.description,
-      data: payload as object,
-      warehouseId: payload.warehouseId ?? null,
-    });
-
-    if (payload.warehouseId) {
-      this.gateway.emitToWarehouse(payload.warehouseId, notification);
-    } else {
-      this.gateway.emitToTenant(event.tenantId, notification);
-    }
-
-    const recipients = await this.findUsersByRoles(event.tenantId, [
-      UserRole.SUPER_ADMIN,
-      UserRole.TENANT_OWNER,
-    ]);
-    await this.emailService.sendCriticalAnomaly(recipients, payload);
   }
 
   @OnEvent(NotificationEvents.LOW_STOCK_DETECTED, { async: true })
@@ -121,6 +95,23 @@ export class NotificationEventListeners {
       severity: NotificationSeverity.INFO,
       title: 'Purchase order received',
       message: `Purchase order ${payload.purchaseOrderId} was received with ${payload.lineItemCount} line item(s).`,
+      data: payload as object,
+      warehouseId: payload.warehouseId,
+    });
+
+    this.gateway.emitToWarehouse(payload.warehouseId, notification);
+    this.gateway.emitToTenant(event.tenantId, notification);
+  }
+
+  @OnEvent(NotificationEvents.PO_CREATED, { async: true })
+  async handlePoCreated(event: PoCreatedEvent): Promise<void> {
+    const { payload } = event;
+    const notification = await this.persist({
+      tenantId: event.tenantId,
+      type: NotificationType.PO_CREATED,
+      severity: NotificationSeverity.INFO,
+      title: 'New Purchase Order Created',
+      message: `Purchase order ${payload.purchaseOrderId} was created with ${payload.lineItemCount} line item(s).`,
       data: payload as object,
       warehouseId: payload.warehouseId,
     });

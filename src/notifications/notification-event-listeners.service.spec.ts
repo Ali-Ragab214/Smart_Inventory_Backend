@@ -23,7 +23,7 @@ describe('NotificationEventListeners', () => {
   let mockUserRepo: { createQueryBuilder: jest.Mock };
   let mockSkuRepo: { findOne: jest.Mock };
   let mockGateway: { emitToTenant: jest.Mock; emitToWarehouse: jest.Mock };
-  let mockEmailService: { sendApprovalRequired: jest.Mock; sendCriticalAnomaly: jest.Mock };
+  let mockEmailService: { sendApprovalRequired: jest.Mock };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -60,7 +60,7 @@ describe('NotificationEventListeners', () => {
     };
 
     mockGateway = { emitToTenant: jest.fn(), emitToWarehouse: jest.fn() };
-    mockEmailService = { sendApprovalRequired: jest.fn(), sendCriticalAnomaly: jest.fn() };
+    mockEmailService = { sendApprovalRequired: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -135,7 +135,7 @@ describe('NotificationEventListeners', () => {
     it('should include active users in the tenant with the given roles', async () => {
       const users = await (listeners as any).findUsersByRoles('tenant-1', [
         UserRole.SUPER_ADMIN,
-        UserRole.TENANT_OWNER,
+        UserRole.TENANT,
       ]);
 
       expect(mockUserRepo.createQueryBuilder).toHaveBeenCalled();

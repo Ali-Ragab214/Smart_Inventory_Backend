@@ -13,7 +13,10 @@ export class PurchaseOrderResponseDto {
   status!: string;
   createdBy!: string;
   negotiationRunId!: string | null;
+  approvalRequestId!: string | null;
   lineItems!: PurchaseOrderLineItemResponseDto[];
+  receiptRating!: number | null;
+  damagedUnits!: number | null;
   createdAt!: Date;
   updatedAt!: Date;
 }

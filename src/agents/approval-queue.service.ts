@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -12,14 +12,23 @@ import { ApprovalRequestResponseDto } from './dto/approval-request-response.dto'
 import { ApproveApprovalRequestDto, RejectApprovalRequestDto } from './dto/approval-action.dto';
 import { NotificationEvents } from '../notifications/events/notification-events';
 import { ApprovalRequestedEvent } from '../notifications/events/approval-requested.event';
+import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
+import { RagEvents, NegotiationApprovedEvent } from '../rag/rag-events';
+import { VendorChannelService } from './vendor-channel/vendor-channel.service';
+import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserRole } from '../users/entities/user.entity';
 
 @Injectable()
 export class ApprovalQueueService {
+  private readonly logger = new Logger(ApprovalQueueService.name);
+
   constructor(
     @InjectRepository(ApprovalRequest)
     private readonly approvalRepo: Repository<ApprovalRequest>,
     private readonly mapper: ApprovalRequestMapper,
     private readonly agentRunService: AgentRunService,
+    private readonly purchaseOrdersService: PurchaseOrdersService,
+    private readonly vendorChannelService: VendorChannelService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -53,15 +62,26 @@ export class ApprovalQueueService {
     return this.mapper.toResponse(saved);
   }
 
-  async findPending(
-    tenantId: string,
+  async findAll(
+    user: UserResponseDto,
     query: ApprovalQueryDto,
   ): Promise<{ data: ApprovalRequestResponseDto[]; total: number }> {
     const qb = this.approvalRepo
       .createQueryBuilder('approval')
-      .where('approval.status = :status', { status: 'pending' })
-      .andWhere('approval.tenantId = :tenantId', { tenantId })
+      .where('approval.tenantId = :tenantId', { tenantId: user.tenantId })
       .orderBy('approval.createdAt', 'DESC');
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      qb.andWhere('approval.payload::text LIKE :warehouseIdLike', {
+        warehouseIdLike: `%${user.warehouseId}%`,
+      });
+    }
+
+    if (query.status) {
+      qb.andWhere('approval.status = :status', {
+        status: query.status,
+      });
+    }
 
     if (query.agentType) {
       qb.andWhere('approval.agentType = :agentType', {
@@ -77,14 +97,22 @@ export class ApprovalQueueService {
   }
 
   async approve(
-    tenantId: string,
+    user: UserResponseDto,
     id: string,
     reviewedBy: string,
     editedPayload?: object,
-  ): Promise<ApprovalRequestResponseDto> {
+  ): Promise<ApprovalRequestResponseDto & { createdPoIds?: string[] }> {
+    const tenantId = user.tenantId!;
     const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
       throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
+    }
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      const payloadStr = JSON.stringify(approval.payload);
+      if (!payloadStr.includes(user.warehouseId)) {
+        throw new ForbiddenException({ message: 'You do not have permission to approve this request.', code: 'FORBIDDEN' });
+      }
     }
 
     approval.status = 'approved';
@@ -98,17 +126,269 @@ export class ApprovalQueueService {
     }
 
     const saved = await this.approvalRepo.save(approval);
-    return this.mapper.toResponse(saved);
+
+    // Finalize the agent run once the request has been decided.
+    if (approval.agentType === 'reorder') {
+      await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'completed');
+    }
+
+    // Materialize an approved reorder proposal into purchase order(s).
+    let createdPoIds: string[] = [];
+    if (approval.agentType === 'reorder') {
+      createdPoIds = await this.finalizeReorderPo(tenantId, approval, reviewedBy);
+    } else if (approval.agentType === 'negotiation') {
+      if (approval.stepNumber === 2) {
+        // Final sign-off → negotiate final PO at the agreed discounted prices.
+        createdPoIds = await this.finalizeNegotiationPo(tenantId, saved, reviewedBy);
+        await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'completed');
+      } else {
+        // Step 1 (Vendor Outreach) approved → deliver the offer through the
+        // configured vendor channel (real email when enabled, else simulated).
+        await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'sent');
+        const payload = (saved.payload ?? {}) as Record<string, unknown>;
+        const offeredDiscount = Number(payload.finalDiscountPercent ?? payload.final ?? payload.requestedDiscountPercent ?? 0);
+        const paymentTermsDays = Math.max(30, Math.round(Number(payload.paymentTermsDays) || 30));
+        const shippingCost = Math.max(0, Number(payload.shippingCost) || 50);
+        // The drafted prose and the structured numbers can disagree (the LLM
+        // writes both independently). Stamp the real values into the text so
+        // the vendor reads exactly what the system will hold them to.
+        const deliveredText = stampOfferIntoText(
+          String(payload.emailContent ?? ''),
+          { discountPercent: offeredDiscount, paymentTermsDays, shippingCost },
+        );
+        await this.vendorChannelService.dispatchOffer(
+          tenantId,
+          saved.id,
+          saved.agentRunId,
+          { discountPercent: offeredDiscount, paymentTermsDays, shippingCost },
+          { ...payload, emailContent: deliveredText },
+        );
+      }
+    }
+
+    return { ...this.mapper.toResponse(saved), createdPoIds };
   }
 
-  async reject(
-    tenantId: string,
+  /**
+   * Persist draft edits (editedPayload) on a pending approval request so the
+   * approval UI and downstream steps read the updated values (discount, terms, ...).
+   */
+  async editDraft(
+    user: UserResponseDto,
     id: string,
-    reviewedBy: string,
+    editedPayload: object,
   ): Promise<ApprovalRequestResponseDto> {
+    const tenantId = user.tenantId!;
     const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
     if (!approval) {
       throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
+    }
+    if (approval.status !== 'pending') {
+      throw new BadRequestException({ message: 'Only pending approval requests can be edited.', code: 'APPROVAL_NOT_EDITABLE' });
+    }
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      const payloadStr = JSON.stringify(approval.payload);
+      if (!payloadStr.includes(user.warehouseId)) {
+        throw new ForbiddenException({ message: 'You do not have permission to edit this request.', code: 'FORBIDDEN' });
+      }
+    }
+
+    approval.payload = {
+      ...(approval.payload as Record<string, unknown>),
+      ...(editedPayload as Record<string, unknown>),
+    };
+    const saved = await this.approvalRepo.save(approval);
+    this.logger.log(`Draft payload updated for approval ${id}.`);
+    return this.mapper.toResponse(saved);
+  }
+
+  private async finalizeReorderPo(
+    tenantId: string,
+    approval: ApprovalRequest,
+    reviewedBy: string,
+  ): Promise<string[]> {
+    const payload = (approval.payload ?? {}) as Record<string, unknown>;
+    const vendorId = payload.vendorId as string | undefined;
+    const items = Array.isArray(payload.items) ? (payload.items as Array<Record<string, unknown>>) : [];
+    const createdPoIds: string[] = [];
+
+    if (!vendorId || items.length === 0) {
+      this.logger.warn(
+        `Cannot create PO for approval ${approval.id}: missing vendorId or line items.`,
+      );
+      return createdPoIds;
+    }
+
+    const byWarehouse = new Map<string, Array<Record<string, unknown>>>();
+    for (const item of items) {
+      const warehouseId = item.warehouseId as string | undefined;
+      if (!warehouseId) continue;
+      const group = byWarehouse.get(warehouseId) ?? [];
+      group.push(item);
+      byWarehouse.set(warehouseId, group);
+    }
+
+    for (const [warehouseId, groupItems] of byWarehouse) {
+      const lineItems = groupItems
+        .map((item) => ({
+          skuId: String(item.skuId ?? ''),
+          quantity: Math.max(1, Math.round(Number(item.recommendedQuantity) || 1)),
+          unitPrice: Number(item.unitPrice) || 0,
+        }))
+        .filter((line) => line.skuId && line.unitPrice > 0);
+      if (lineItems.length === 0) continue;
+
+      try {
+        const po = await this.purchaseOrdersService.create(tenantId, {
+          vendorId,
+          warehouseId,
+          lineItems,
+          createdBy: reviewedBy,
+          approvalRequestId: approval.id,
+          status: 'pending_approval',
+        });
+        createdPoIds.push(po.id);
+        this.logger.log(
+          `Approval ${approval.id} finalized into PO ${po.id} (warehouse ${warehouseId}, ${lineItems.length} line item(s)).`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Failed to create PO for approval ${approval.id}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    return createdPoIds;
+  }
+
+  /** 3.3 — Final sign-off of a negotiated round: create PO(s) at agreed discounts. */
+  private async finalizeNegotiationPo(
+    tenantId: string,
+    approval: ApprovalRequest,
+    reviewedBy: string,
+  ): Promise<string[]> {
+    const payload = (approval.payload ?? {}) as Record<string, unknown>;
+    const vendorId = (payload.vendorId as string | undefined) ?? undefined;
+    const finalDiscount = Math.max(
+      0,
+      Math.min(100, Number(
+        payload.finalDiscountPercent ?? payload.final ?? payload.requestedDiscountPercent ?? 0,
+      )),
+    );
+    const createdPoIds: string[] = [];
+
+    if (!vendorId) {
+      this.logger.warn(`Cannot create negotiated PO for approval ${approval.id}: missing vendorId.`);
+      return createdPoIds;
+    }
+
+    const run = await this.agentRunService.loadEntity(tenantId, approval.agentRunId);
+    let items: Array<Record<string, unknown>> = Array.isArray(payload.items)
+      ? (payload.items as Array<Record<string, unknown>>)
+      : [];
+    if (items.length === 0) {
+      items =
+        (run?.negotiationItems as Array<Record<string, unknown>> | undefined) ?? [];
+    }
+
+    // Fallback: load items from the original reorder approval via contextRunId
+    if (items.length === 0 && run?.contextRunId) {
+      const originalApproval = await this.approvalRepo.findOne({
+        where: { agentRunId: run.contextRunId, tenantId },
+      });
+      if (originalApproval) {
+        const originalPayload = (originalApproval.payload ?? {}) as Record<string, unknown>;
+        items = Array.isArray(originalPayload.items)
+          ? (originalPayload.items as Array<Record<string, unknown>>)
+          : [];
+        if (items.length > 0) {
+          this.logger.log(`Loaded ${items.length} items from original reorder approval ${originalApproval.id} for negotiation PO.`);
+        }
+      }
+    }
+
+    if (items.length === 0) {
+      this.logger.warn(`Cannot create negotiated PO for approval ${approval.id}: no items.`);
+      return createdPoIds;
+    }
+
+    const byWarehouse = new Map<string, Array<Record<string, unknown>>>();
+    for (const item of items) {
+      const warehouseId = item.warehouseId as string | undefined;
+      if (!warehouseId) continue;
+      const group = byWarehouse.get(warehouseId) ?? [];
+      group.push(item);
+      byWarehouse.set(warehouseId, group);
+    }
+
+    for (const [warehouseId, groupItems] of byWarehouse) {
+      const lineItems = groupItems
+        .map((item) => {
+          const basePrice = Math.max(0, Number(item.unitPrice || 0));
+          const unitPrice =
+            Math.round(basePrice * (1 - finalDiscount / 100) * 10000) / 10000;
+          return {
+            skuId: String(item.skuId ?? ''),
+            quantity: Math.max(1, Math.round(Number(item.recommendedQuantity ?? item.quantity) || 1)),
+            unitPrice,
+          };
+        })
+        .filter((line) => line.skuId && line.unitPrice > 0);
+      if (lineItems.length === 0) continue;
+
+      try {
+        const po = await this.purchaseOrdersService.create(tenantId, {
+          vendorId,
+          warehouseId,
+          lineItems,
+          createdBy: reviewedBy,
+          approvalRequestId: approval.id,
+          negotiationRunId: approval.agentRunId,
+          status: 'pending_approval',
+        });
+        createdPoIds.push(po.id);
+        this.logger.log(
+          `Negotiation ${approval.id} finalized into PO ${po.id} at ${finalDiscount}% discount (warehouse ${warehouseId}).`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Failed to create negotiated PO for approval ${approval.id}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    this.eventEmitter.emit(
+      RagEvents.NEGOTIATION_APPROVED,
+      {
+        tenantId,
+        approvalId: approval.id,
+        vendorId,
+        agentRunId: approval.agentRunId,
+        reasoning: approval.reasoning ?? '',
+        payload: { ...payload, finalDiscountPercent: finalDiscount },
+      } satisfies NegotiationApprovedEvent,
+    );
+
+    return createdPoIds;
+  }
+
+  async reject(
+    user: UserResponseDto,
+    id: string,
+    reviewedBy: string,
+  ): Promise<ApprovalRequestResponseDto> {
+    const tenantId = user.tenantId!;
+    const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
+    if (!approval) {
+      throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
+    }
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      const payloadStr = JSON.stringify(approval.payload);
+      if (!payloadStr.includes(user.warehouseId)) {
+        throw new ForbiddenException({ message: 'You do not have permission to reject this request.', code: 'FORBIDDEN' });
+      }
     }
 
     approval.status = 'rejected';
@@ -118,4 +398,81 @@ export class ApprovalQueueService {
     await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'rejected');
     return this.mapper.toResponse(saved);
   }
+
+  async negotiate(
+    user: UserResponseDto,
+    id: string,
+    reviewedBy: string,
+  ): Promise<ApprovalRequestResponseDto> {
+    const tenantId = user.tenantId!;
+    const approval = await this.approvalRepo.findOne({ where: { id, tenantId } });
+    if (!approval) {
+      throw new NotFoundException({ message: 'This approval request could not be found or has expired.', code: 'APPROVAL_REQUEST_NOT_FOUND' });
+    }
+
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId) {
+      const payloadStr = JSON.stringify(approval.payload);
+      if (!payloadStr.includes(user.warehouseId)) {
+        throw new ForbiddenException({ message: 'You do not have permission to defer this request.', code: 'FORBIDDEN' });
+      }
+    }
+
+    if (approval.status !== 'pending') {
+      throw new BadRequestException({ message: 'Only pending approval requests can be sent to negotiation.', code: 'APPROVAL_NOT_PENDING' });
+    }
+    if (approval.agentType !== 'reorder') {
+      throw new BadRequestException({ message: 'Negotiation handoff is only available for reorder proposals.', code: 'NEGOTIATION_NOT_ALLOWED' });
+    }
+
+    approval.status = 'deferred';
+    approval.reviewedBy = reviewedBy;
+    approval.reviewedAt = new Date();
+    const saved = await this.approvalRepo.save(approval);
+    await this.agentRunService.updateStatus(tenantId, approval.agentRunId, 'escalated');
+
+    const payload = (approval.payload ?? {}) as Record<string, unknown>;
+    const items = Array.isArray(payload.items)
+      ? (payload.items as Array<Record<string, unknown>>)
+      : [];
+    const skuIds = [...new Set(items.map((item) => String(item.skuId ?? '')).filter(Boolean))];
+    const vendorId = (payload.vendorId as string | undefined) ?? undefined;
+
+    const runResult = await this.agentRunService.start(tenantId, 'negotiation', {
+      skuIds,
+      vendorId,
+      contextRunId: approval.agentRunId,
+      negotiationItems: items,
+    });
+    const negRunId = (runResult as any).data?.id ?? (runResult as any).id;
+    await this.agentRunService.enqueue(tenantId, negRunId, 'negotiation');
+    this.logger.log(
+      `Approval ${approval.id} deferred to negotiation run ${negRunId} (${skuIds.length} SKU(s)).`,
+    );
+
+    return this.mapper.toResponse(saved);
+  }
+}
+
+/**
+ * Align the prose numbers in a drafted offer email with the structured offer
+ * values the system actually uses, so a vendor never reads a "12%" that the
+ * system holds as "10%". Order matters: terms first, then the discount so a
+ * stray "net 35" cannot swallow the percentage token, and shipping only when
+ * a dollar figure sits next to a shipping mention.
+ */
+export function stampOfferIntoText(
+  text: string,
+  offer: { discountPercent: number; paymentTermsDays: number; shippingCost: number },
+): string {
+  if (!text) return text;
+  const { discountPercent, paymentTermsDays, shippingCost } = offer;
+  let out = text.replace(/net[\s-]?\d{1,3}(?:\s*days?)?/i, `net ${paymentTermsDays} days`);
+  out = out.replace(/(\d{1,3}(?:\.\d+)?)\s*%/, `${discountPercent}%`);
+  if (shippingCost > 0) {
+    out = out.replace(
+      /\$\s?\d{1,3}(?:\.\d+)?(?=\D{0,20}(?:shipping|freight|delivery))/i,
+      `$${shippingCost}`,
+    );
+  }
+  return out;
 }

@@ -1,8 +1,8 @@
 export const NotificationEvents = {
   APPROVAL_REQUESTED: 'approval.requested',
-  ANOMALY_FLAGGED: 'anomaly.flagged',
   LOW_STOCK_DETECTED: 'lowstock.detected',
   PO_RECEIVED: 'po.received',
+  PO_CREATED: 'po.created',
   VENDOR_RESPONDED: 'vendor.responded',
 } as const;
 

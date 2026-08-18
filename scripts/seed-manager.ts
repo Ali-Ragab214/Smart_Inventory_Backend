@@ -29,7 +29,7 @@ async function bootstrap() {
       email: 'tenant@example.com',
       username: 'tenant',
       passwordHash: 'Password@123',
-      role: UserRole.TENANT_OWNER,
+      role: UserRole.TENANT,
       tenantId: tenant.id,
     });
     await userRepo.save(owner);

@@ -13,6 +13,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  StreamableFile,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
 import { UserResponseDto } from '../users/dto/user-response.dto';
@@ -45,6 +46,9 @@ export class SkuController {
   @ApiOkResponse({ type: SkuResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request payload' })
   async create(@Body() createSkuDto: CreateSkuDto, @CurrentUser() user: UserResponseDto) {
+    if (user.warehouseId && !createSkuDto.warehouseId) {
+      createSkuDto.warehouseId = user.warehouseId;
+    }
     const data = await this.skuService.create(user.tenantId!, createSkuDto);
     return successResponse(data);
   }
@@ -85,11 +89,26 @@ export class SkuController {
     return successResponse(data);
   }
 
+  @Get('export')
+  @ApiOperation({ summary: 'Export all SKUs as a CSV file' })
+  @ApiOkResponse({
+    description: 'CSV file of all SKUs for the current tenant',
+    content: { 'text/csv': {} },
+  })
+  async exportCsv(@CurrentUser() user: UserResponseDto): Promise<StreamableFile> {
+    const csv = await this.skuService.exportCsv(user.tenantId!);
+    const filename = `skus-${new Date().toISOString().slice(0, 10)}.csv`;
+    return new StreamableFile(Buffer.from(csv, 'utf-8'), {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="${filename}"`,
+    });
+  }
+
   @Get()
   @ApiOperation({ summary: 'List SKUs' })
   @ApiOkResponse({ type: SkuResponseDto, isArray: true })
   async findAll(@Query() query: SkuQueryDto, @CurrentUser() user: UserResponseDto) {
-    const { data, total } = await this.skuService.findAll(user.tenantId!, query);
+    const { data, total } = await this.skuService.findAll(user, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 

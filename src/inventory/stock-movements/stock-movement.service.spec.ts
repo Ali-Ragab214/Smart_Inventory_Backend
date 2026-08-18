@@ -6,6 +6,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StockMovementService } from './stock-movement.service';
 import { StockMovement } from './entities/stock-movement.entity';
 import { StockLevel } from '../stock-levels/entities/stock-level.entity';
+import { Warehouse } from '../../warehouses/entities/warehouse.entity';
 import { StockMovementMapper } from './mappers/stock-movement.mapper';
 import { MovementReason } from './enums/movement-reason.enum';
 
@@ -26,12 +27,23 @@ describe('StockMovementService', () => {
     findOne: jest.fn(),
     create: jest.fn((data) => ({ ...data })),
     save: jest.fn((entity) => Promise.resolve(entity)),
+    createQueryBuilder: jest.fn(() => ({
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({ total: '0' }),
+    })),
+  };
+
+  const mockWarehouseRepo = {
+    findOne: jest.fn().mockResolvedValue({ id: 'wh-uuid', capacityUnits: null }),
   };
 
   const mockEntityManager = {
     getRepository: jest.fn((entityClass) => {
       if (entityClass === StockMovement) return mockMovRepo;
       if (entityClass === StockLevel) return mockStockLevelRepo;
+      if (entityClass === Warehouse) return mockWarehouseRepo;
       return null;
     }),
   };
@@ -138,6 +150,45 @@ describe('StockMovementService', () => {
       );
     });
 
+    it('should throw BadRequestException if movement would exceed warehouse capacity', async () => {
+      const mockStockLevel = { id: 'sl-uuid', skuId: 'sku-uuid', warehouseId: 'wh-uuid', quantity: 5 };
+      mockMovRepo.findOne.mockResolvedValue(null);
+      mockStockLevelRepo.findOne.mockResolvedValue(mockStockLevel);
+      mockWarehouseRepo.findOne.mockResolvedValue({ id: 'wh-uuid', capacityUnits: 10 });
+      mockStockLevelRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ total: '10' }),
+      });
+
+      await expect(service.recordMovement(TENANT_ID, params)).rejects.toThrow(BadRequestException);
+      await expect(service.recordMovement(TENANT_ID, params)).rejects.toMatchObject({
+        response: { code: 'WAREHOUSE_CAPACITY_EXCEEDED' },
+      });
+    });
+
+    it('should allow movement when warehouse still has capacity', async () => {
+      const mockStockLevel = { id: 'sl-uuid', skuId: 'sku-uuid', warehouseId: 'wh-uuid', quantity: 5 };
+      mockMovRepo.findOne.mockResolvedValue(null);
+      mockStockLevelRepo.findOne.mockResolvedValue(mockStockLevel);
+      mockWarehouseRepo.findOne.mockResolvedValue({ id: 'wh-uuid', capacityUnits: 20 });
+      mockStockLevelRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ total: '5' }),
+      });
+
+      const result = await service.recordMovement(TENANT_ID, params);
+
+      expect(result.balanceAfter).toBe(15);
+      expect(mockWarehouseRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'wh-uuid', tenantId: TENANT_ID },
+        lock: { mode: 'pessimistic_write' },
+      });
+    });
+
     it('should successfully record movement and update StockLevel balance', async () => {
       const mockStockLevel = { id: 'sl-uuid', skuId: 'sku-uuid', warehouseId: 'wh-uuid', quantity: 5 };
       mockMovRepo.findOne.mockResolvedValue(null);
@@ -166,6 +217,33 @@ describe('StockMovementService', () => {
       expect(result.balanceAfter).toBe(15);
       expect(result.skuId).toBe('sku-uuid');
       expect(result.warehouseId).toBe('wh-uuid');
+    });
+  });
+
+  describe('transfer', () => {
+    const transferParams = {
+      skuId: 'sku-uuid',
+      fromWarehouseId: 'wh-a',
+      toWarehouseId: 'wh-b',
+      quantity: 5,
+      idempotencyKey: 'transfer-key-1',
+      performedByUserId: 'user-uuid',
+    };
+
+    it('should reject transfer when destination warehouse is at capacity', async () => {
+      mockMovRepo.findOne.mockResolvedValue(null);
+      mockStockLevelRepo.findOne.mockResolvedValue({ id: 'sl-a', quantity: 20 });
+      mockWarehouseRepo.findOne.mockResolvedValue({ id: 'wh-b', capacityUnits: 10 });
+      mockStockLevelRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ total: '10' }),
+      });
+
+      await expect(service.transfer(TENANT_ID, transferParams)).rejects.toMatchObject({
+        response: { code: 'WAREHOUSE_CAPACITY_EXCEEDED' },
+      });
     });
   });
 

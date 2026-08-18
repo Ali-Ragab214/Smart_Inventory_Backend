@@ -1,6 +1,7 @@
 import { Type, Transform } from 'class-transformer';
 import {
   IsArray,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -13,19 +14,7 @@ import {
   ArrayMinSize,
 } from 'class-validator';
 
-export class CreatePurchaseOrderLineItemDto {
-  @IsUUID()
-  @IsNotEmpty()
-  skuId!: string;
-
-  @IsInt()
-  @Min(1)
-  quantity!: number;
-
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @IsPositive()
-  unitPrice!: number;
-}
+import { CreatePurchaseOrderLineItemDto } from './create-purchase-order-line-item.dto';
 
 export class CreatePurchaseOrderDto {
   @IsUUID()
@@ -45,4 +34,16 @@ export class CreatePurchaseOrderDto {
   @IsString()
   @IsOptional()
   createdBy?: string;
+
+  @IsUUID()
+  @IsOptional()
+  approvalRequestId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  negotiationRunId?: string;
+
+  @IsOptional()
+  @IsIn(['draft', 'pending_approval', 'approved'])
+  status?: string;
 }

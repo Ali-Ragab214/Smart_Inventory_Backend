@@ -41,8 +41,8 @@ async function bootstrap() {
 
   console.log('Creating Warehouses...');
   const warehouseRepo = dataSource.getRepository(Warehouse);
-  const w1 = warehouseRepo.create({ name: 'Main Hub', location: '123 Main St', isMain: true, status: WarehouseStatus.ACTIVE, tenantId: tenant.id });
-  const w2 = warehouseRepo.create({ name: 'East Branch', location: '456 East Ave', isMain: false, status: WarehouseStatus.ACTIVE, tenantId: tenant.id });
+  const w1 = warehouseRepo.create({ name: 'Main Hub', location: '123 Main St', isMain: true, status: WarehouseStatus.ACTIVE, tenantId: tenant.id, capacityUnits: 1200 });
+  const w2 = warehouseRepo.create({ name: 'East Branch', location: '456 East Ave', isMain: false, status: WarehouseStatus.ACTIVE, tenantId: tenant.id, capacityUnits: 800 });
   await warehouseRepo.save([w1, w2]);
 
   console.log('Creating Users...');
@@ -51,10 +51,9 @@ async function bootstrap() {
     userRepo.create({ name, email, username, passwordHash: 'Password123!', role, tenantId: tenant.id, warehouseId: whId, isActive: true });
 
   const users = [
-    createUsr('Admin User', 'admin@acme.com', 'admin', UserRole.SUPER_ADMIN, null),
-    createUsr('Owner User', 'owner@acme.com', 'owner', UserRole.TENANT_OWNER, null),
+    createUsr('Owner User', 'owner@acme.com', 'owner', UserRole.TENANT, null),
     createUsr('Warehouse Manager', 'manager@acme.com', 'manager', UserRole.WAREHOUSE_MANAGER, w1.id),
-    createUsr('Inventory Clerk', 'clerk@acme.com', 'clerk', UserRole.INVENTORY_CLERK, w1.id),
+    createUsr('Inventory Clerk', 'clerk@acme.com', 'clerk', UserRole.CLERK, w1.id),
   ];
   await userRepo.save(users);
 
@@ -168,7 +167,20 @@ async function bootstrap() {
     idempotencyKey: 'seed-transfer-out-1',
   });
 
-  await movementRepo.save([m1, m2, m3, m4]);
+  const m5_adjustment = movementRepo.create({
+    tenantId: tenant.id,
+    skuId: s1.id,
+    warehouseId: w1.id,
+    reason: MovementReason.MANUAL_ADJUSTMENT,
+    quantityChange: -10,
+    balanceAfter: 3,
+    performedByUserId: users[3].id,
+    note: 'Unexplained shrinkage - manual adjustment',
+    idempotencyKey: 'seed-adjustment-1',
+    createdAt: new Date()
+  });
+
+  await movementRepo.save([m1, m2, m3, m4, m5_adjustment]);
 
   console.log('Seeding completed successfully!');
   await app.close();

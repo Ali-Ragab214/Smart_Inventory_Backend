@@ -9,9 +9,12 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
 import { Roles } from '../auth/roles.decorator';
+import { TenantGuard } from '../auth/tenant.guard';
+import { UserRole } from '../users/entities/user.entity';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import {
   ApiBadRequestResponse,
@@ -26,14 +29,17 @@ import { WarehousesService } from './warehouses.service';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { WarehouseResponseDto } from './dto/warehouse-response.dto';
+import { WarehouseSummaryDto } from './dto/warehouse-summary.dto';
 import { successResponse } from '../utils/response.util';
 
 @ApiTags('warehouses')
 @Controller('warehouses')
+@UseGuards(TenantGuard)
 export class WarehousesController {
   constructor(private readonly warehousesService: WarehousesService) {}
 
   @Post()
+  @Roles(UserRole.TENANT)
   @ApiOperation({ summary: 'Create a warehouse' })
   @ApiCreatedResponse({ type: WarehouseResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid request body' })
@@ -47,6 +53,14 @@ export class WarehousesController {
   @ApiOkResponse({ type: WarehouseResponseDto, isArray: true })
   async findAll(@CurrentUser() user: UserResponseDto) {
     const data = await this.warehousesService.findAll(user);
+    return successResponse(data);
+  }
+
+  @Get('summary')
+  @ApiOperation({ summary: 'List all warehouses with live metrics (units, stock value, coverage, staff, open orders)' })
+  @ApiOkResponse({ type: WarehouseSummaryDto, isArray: true })
+  async findAllSummary(@CurrentUser() user: UserResponseDto) {
+    const data = await this.warehousesService.findAllWithMetrics(user);
     return successResponse(data);
   }
 
@@ -71,7 +85,7 @@ export class WarehousesController {
     return successResponse(data);
   }
 
-  @Roles('super_admin', 'tenant_owner')
+  @Roles(UserRole.TENANT)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete a warehouse' })

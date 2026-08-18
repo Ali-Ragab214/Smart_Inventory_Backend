@@ -92,6 +92,42 @@ export class AuthService {
     };
   }
 
+  async validateOAuthLogin(profile: any): Promise<any> {
+    let user = await this.usersService.findByGoogleId(profile.googleId);
+    
+    if (!user) {
+      // Check if user exists by email
+      user = await this.usersService.findByEmailForAuth(profile.email);
+      if (user) {
+        // Link google account
+        user.googleId = profile.googleId;
+        user = await this.usersService.saveRawUser(user);
+      } else {
+        // Create new user
+        user = await this.usersService.createGoogleUser(profile);
+      }
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException({ message: 'Your account is deactivated.', code: 'USER_INACTIVE' });
+    }
+
+    const payload = {
+      sub: user.id,
+      username: user.username,
+      role: user.role,
+      tenantId: user.tenantId,
+      warehouseId: user.warehouseId,
+    };
+    
+    const userDto = await this.usersService.findById(null, user.id);
+
+    return {
+      user: userDto,
+      access_token: await this.jwtService.signAsync(payload),
+    };
+  }
+
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto): Promise<{ message: string }> {
     const user = await this.usersService.findByEmailForAuth(forgotPasswordDto.email);
     if (!user) {

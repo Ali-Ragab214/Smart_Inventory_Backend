@@ -11,6 +11,7 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   StockMovementService,
@@ -23,10 +24,14 @@ import { successResponse, paginatedResponse } from '../../utils/response.util';
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../auth/decorators/current-user/current-user.decorator';
 import { UserResponseDto } from '../../users/dto/user-response.dto';
+import { UserRole } from '../../users/entities/user.entity';
+import { TenantGuard } from '../../auth/tenant.guard';
+import { WarehouseGuard } from '../../auth/warehouse.guard';
 
 @ApiTags('Stock Movements')
 @ApiBearerAuth()
 @Controller('inventory/stock-movements')
+@UseGuards(TenantGuard, WarehouseGuard)
 export class StockMovementController {
   constructor(private readonly stockMovementService: StockMovementService) {}
 
@@ -40,6 +45,9 @@ export class StockMovementController {
   @ApiOperation({ summary: 'Record a stock movement' })
   @ApiCreatedResponse({ type: StockMovementResponseDto })
   async recordMovement(@Body() dto: RecordMovementDto, @CurrentUser() user: UserResponseDto) {
+    if ((user.role === UserRole.WAREHOUSE_MANAGER || user.role === UserRole.CLERK) && user.warehouseId) {
+      dto.warehouseId = user.warehouseId;
+    }
     const data = await this.stockMovementService.recordMovement(user.tenantId!, {
       skuId: dto.skuId,
       warehouseId: dto.warehouseId,
@@ -64,6 +72,9 @@ export class StockMovementController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Transfer stock between warehouses' })
   async transfer(@Body() dto: TransferStockDto, @CurrentUser() user: UserResponseDto) {
+    if ((user.role === UserRole.WAREHOUSE_MANAGER || user.role === UserRole.CLERK) && user.warehouseId) {
+      dto.fromWarehouseId = user.warehouseId;
+    }
     const data = await this.stockMovementService.transfer(user.tenantId!, {
       skuId: dto.skuId,
       fromWarehouseId: dto.fromWarehouseId,
@@ -88,6 +99,9 @@ export class StockMovementController {
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit?: number,
     @CurrentUser() user?: UserResponseDto,
   ) {
+    if ((user?.role === UserRole.WAREHOUSE_MANAGER || user?.role === UserRole.CLERK) && user?.warehouseId) {
+      warehouseId = user.warehouseId;
+    }
     const data = await this.stockMovementService.getRecentMovements(user!.tenantId!, warehouseId, limit);
     return successResponse(data);
   }
@@ -107,7 +121,11 @@ export class StockMovementController {
     @Query() query: StockMovementQueryDto,
     @CurrentUser() user?: UserResponseDto,
   ) {
-    const { data, total } = await this.stockMovementService.getHistoryForSku(user!.tenantId!, skuId, query);
+    let warehouseId: string | undefined = undefined;
+    if ((user?.role === UserRole.WAREHOUSE_MANAGER || user?.role === UserRole.CLERK) && user?.warehouseId) {
+      warehouseId = user.warehouseId;
+    }
+    const { data, total } = await this.stockMovementService.getHistoryForSku(user!.tenantId!, skuId, query, warehouseId);
     return paginatedResponse(data, query.page!, query.limit!, total);
   }
 
@@ -123,9 +141,12 @@ export class StockMovementController {
   async reconcileBalance(
     @Param('skuId', ParseUUIDPipe) skuId: string,
     @Query('warehouseId', ParseUUIDPipe) warehouseId: string,
-    @CurrentUser() user?: UserResponseDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.stockMovementService.reconcileBalance(user!.tenantId!, skuId, warehouseId);
+    if ((user.role === UserRole.WAREHOUSE_MANAGER || user.role === UserRole.CLERK) && user.warehouseId) {
+      warehouseId = user.warehouseId;
+    }
+    const data = await this.stockMovementService.reconcileBalance(user.tenantId!, skuId, warehouseId);
     return successResponse(data);
   }
 
@@ -141,9 +162,12 @@ export class StockMovementController {
     @Param('skuId', ParseUUIDPipe) skuId: string,
     @Query('warehouseId', ParseUUIDPipe) warehouseId: string,
     @Query('sinceDays', new DefaultValuePipe(30), ParseIntPipe) sinceDays: number,
-    @CurrentUser() user?: UserResponseDto,
+    @CurrentUser() user: UserResponseDto,
   ) {
-    const data = await this.stockMovementService.getConsumptionSeries(user!.tenantId!, skuId, warehouseId, sinceDays);
+    if ((user.role === UserRole.WAREHOUSE_MANAGER || user.role === UserRole.CLERK) && user.warehouseId) {
+      warehouseId = user.warehouseId;
+    }
+    const data = await this.stockMovementService.getConsumptionSeries(user.tenantId!, skuId, warehouseId, sinceDays);
     return successResponse(data);
   }
 }

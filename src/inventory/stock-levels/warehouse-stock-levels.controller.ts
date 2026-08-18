@@ -9,9 +9,12 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../auth/decorators/current-user/current-user.decorator';
 import { UserResponseDto } from '../../users/dto/user-response.dto';
+import { TenantGuard } from '../../auth/tenant.guard';
+import { WarehouseGuard } from '../../auth/warehouse.guard';
 import {
   ApiTags,
   ApiOperation,
@@ -30,6 +33,7 @@ import { successResponse, paginatedResponse } from '../../utils/response.util';
 @ApiTags('Warehouse Stock Levels')
 @ApiBearerAuth()
 @Controller('warehouses/:warehouseId/stock-levels')
+@UseGuards(TenantGuard, WarehouseGuard)
 export class WarehouseStockLevelsController {
   constructor(private readonly stockLevelsService: StockLevelsService) {}
 

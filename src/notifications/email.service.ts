@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { User } from '../users/entities/user.entity';
 import { ApprovalRequestedPayload } from './events/approval-requested.event';
-import { AnomalyFlaggedPayload } from './events/anomaly-flagged.event';
 
 @Injectable()
 export class EmailService {
@@ -100,17 +99,31 @@ export class EmailService {
     await this.sendToUsers(users, subject, html);
   }
 
-  async sendCriticalAnomaly(
+  async sendTrialEndingWarning(
     users: User[],
-    payload: AnomalyFlaggedPayload,
   ): Promise<void> {
-    const subject = 'Critical anomaly flagged in inventory';
+    const subject = 'Your StockSavvy Free Trial is Ending Soon!';
     const html = `
       <div style="font-family: sans-serif; padding: 20px;">
-        <h2>Critical Anomaly Flagged</h2>
-        <p>${payload.description}</p>
-        ${payload.skuId ? `<p>SKU: ${payload.skuId}</p>` : ''}
-        <p style="font-size: 12px; color: #666;">Review the anomaly in the StockSavvy dashboard.</p>
+        <h2>Trial Expiring in 3 Days</h2>
+        <p>Your 14-day free trial of StockSavvy will expire in exactly 3 days.</p>
+        <p>To avoid losing access to your inventory data and AI insights, please log in and upgrade your plan.</p>
+        <p style="font-size: 12px; color: #666;">If you have any questions, reply to this email.</p>
+      </div>
+    `;
+    await this.sendToUsers(users, subject, html);
+  }
+
+  async sendTrialExpired(
+    users: User[],
+  ): Promise<void> {
+    const subject = 'Your StockSavvy Trial has Expired';
+    const html = `
+      <div style="font-family: sans-serif; padding: 20px;">
+        <h2>Trial Expired</h2>
+        <p>Your 14-day free trial of StockSavvy has officially expired.</p>
+        <p>Your account is now locked. Don't worry, your data is safe! Simply log into the dashboard and subscribe to a paid plan to regain full access.</p>
+        <p style="font-size: 12px; color: #666;">We hope you enjoyed the trial!</p>
       </div>
     `;
     await this.sendToUsers(users, subject, html);

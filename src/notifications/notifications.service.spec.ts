@@ -14,6 +14,10 @@ describe('NotificationsService', () => {
   const user: UserResponseDto = {
     id: 'user-1',
     name: null,
+    phone: null,
+    avatarUrl: null,
+    location: null,
+    bio: null,
     email: 'manager@test.com',
     username: 'manager',
     role: UserRole.WAREHOUSE_MANAGER,

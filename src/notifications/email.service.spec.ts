@@ -74,7 +74,7 @@ describe('EmailService', () => {
 
   it('should send an approval-required email to every recipient user', async () => {
     const users = [
-      { id: 'u1', email: 'owner@test.com', role: UserRole.TENANT_OWNER },
+      { id: 'u1', email: 'owner@test.com', role: UserRole.TENANT },
       { id: 'u2', email: 'manager@test.com', role: UserRole.WAREHOUSE_MANAGER },
     ] as any;
 

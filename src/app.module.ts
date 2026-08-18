@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { BullModule } from "@nestjs/bullmq";
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { SkuModule } from './sku/sku.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
@@ -15,6 +16,12 @@ import { WarehousesModule } from './warehouses/warehouses.module';
 import { StockLevelsModule } from './inventory/stock-levels/stock-levels.module';
 import { KnowledgeChunksModule } from './knowledge-chunks/knowledge-chunks.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { UploadsModule } from './uploads/uploads.module';
+import { RagModule } from './rag/rag.module';
+import { TenantsModule } from './tenants/tenants.module';
+import { ForecastsModule } from './forecasts/forecasts.module';
+import { PlansModule } from './plans/plans.module';
+import { StripeModule } from './stripe/stripe.module';
 
 @Module({
   imports: [
@@ -23,6 +30,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     }),
 
     EventEmitterModule.forRoot(),
+    ScheduleModule.forRoot(),
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -60,6 +68,12 @@ import { NotificationsModule } from './notifications/notifications.module';
     StockLevelsModule,
     KnowledgeChunksModule,
     NotificationsModule,
+    UploadsModule,
+    RagModule,
+    TenantsModule,
+    ForecastsModule,
+    PlansModule,
+    StripeModule,
   ],
 })
 export class AppModule {}

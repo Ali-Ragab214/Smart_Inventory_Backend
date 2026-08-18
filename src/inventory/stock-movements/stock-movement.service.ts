@@ -5,9 +5,10 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { StockMovement } from './entities/stock-movement.entity';
 import { StockLevel } from '../stock-levels/entities/stock-level.entity';
+import { Warehouse } from '../../warehouses/entities/warehouse.entity';
 import { MovementReason } from './enums/movement-reason.enum';
 import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { StockMovementResponseDto } from './dto/stock-movement-response.dto';
@@ -123,6 +124,9 @@ export class StockMovementService {
         throw new BadRequestException({ message: `Movement would result in negative stock (current: ${stockLevel.quantity}, change: ${params.quantityChange}).`, code: 'INSUFFICIENT_STOCK' });
       }
 
+      // Step 5b: Guard against exceeding warehouse storage capacity
+      await this.assertWarehouseCapacity(manager, tenantId, params.warehouseId, params.quantityChange);
+
       // Step 6: Insert the ledger row
       const movement = movRepo.create({
         skuId: params.skuId,
@@ -145,7 +149,7 @@ export class StockMovementService {
       await slRepo.save(stockLevel);
 
       // Step 7b: Emit low-stock event when quantity crosses the reorder threshold
-      if (stockLevel.reorderThreshold > 0 && newBalance <= stockLevel.reorderThreshold) {
+      if (stockLevel.reorderThreshold >= 0 && newBalance <= stockLevel.reorderThreshold) {
         this.eventEmitter.emit(
           NotificationEvents.LOW_STOCK_DETECTED,
           new LowStockDetectedEvent(tenantId, {
@@ -162,6 +166,45 @@ export class StockMovementService {
       // Step 8: Return mapped response
       return this.mapper.toResponse(saved);
     });
+  }
+
+  /**
+   * Rejects inbound movements that would push a warehouse's total stock above
+   * its configured `capacityUnits`. Skipped when capacity is not configured
+   * (NULL / <= 0) or when the movement only decreases stock.
+   *
+   * The warehouse row is locked so concurrent inbound movements are serialized
+   * per warehouse — otherwise two simultaneous receipts could both pass the check.
+   */
+  private async assertWarehouseCapacity(
+    manager: EntityManager,
+    tenantId: string,
+    warehouseId: string,
+    additionalUnits: number,
+  ): Promise<void> {
+    if (additionalUnits <= 0) return;
+
+    const warehouse = await manager.getRepository(Warehouse).findOne({
+      where: { id: warehouseId, tenantId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!warehouse || warehouse.capacityUnits == null || warehouse.capacityUnits <= 0) return;
+
+    const raw = (await manager
+      .getRepository(StockLevel)
+      .createQueryBuilder('sl')
+      .select('COALESCE(SUM(sl.quantity), 0)', 'total')
+      .where('sl.warehouseId = :warehouseId', { warehouseId })
+      .andWhere('sl.tenantId = :tenantId', { tenantId })
+      .getRawOne<{ total: string }>()) as { total: string } | undefined;
+
+    const currentUnits = parseInt(raw?.total ?? '0', 10);
+    if (currentUnits + additionalUnits > warehouse.capacityUnits) {
+      throw new BadRequestException({
+        message: `Movement would exceed warehouse storage capacity (${currentUnits} / ${warehouse.capacityUnits} units).`,
+        code: 'WAREHOUSE_CAPACITY_EXCEEDED',
+      });
+    }
   }
 
   //  Recent movements across all SKUs (for dashboards)
@@ -198,12 +241,17 @@ export class StockMovementService {
     tenantId: string,
     skuId: string,
     query: StockMovementQueryDto,
+    warehouseId?: string,
   ): Promise<{ data: StockMovementResponseDto[]; total: number }> {
     const qb = this.movementRepo
       .createQueryBuilder('sm')
       .where('sm.skuId = :skuId', { skuId })
       .andWhere('sm.tenantId = :tenantId', { tenantId })
       .orderBy('sm.createdAt', 'DESC');
+
+    if (warehouseId) {
+      qb.andWhere('sm.warehouseId = :warehouseId', { warehouseId });
+    }
 
     if (query.from) {
       qb.andWhere('sm.createdAt >= :from', { from: new Date(query.from) });
@@ -323,6 +371,9 @@ export class StockMovementService {
         throw new BadRequestException({ message: `Insufficient stock in source warehouse (available: ${sourceSl.quantity}, transfer: ${params.quantity})`, code: 'INSUFFICIENT_STOCK' });
       }
       const newDestBalance = destSl.quantity + params.quantity;
+
+      // Capacity guard for the destination warehouse
+      await this.assertWarehouseCapacity(manager, tenantId, params.toWarehouseId, params.quantity);
 
       // OUT movement
       const outMovement = movRepo.create({

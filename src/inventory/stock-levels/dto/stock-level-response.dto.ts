@@ -16,6 +16,9 @@ export class StockLevelResponseDto {
   @ApiProperty({ description: 'Human-readable warehouse name' })
   warehouseName!: string;
 
+  @ApiProperty({ description: 'Warehouse city/location (e.g. Alexandria)' })
+  warehouseLocation!: string;
+
   @ApiProperty()
   quantity!: number;
 

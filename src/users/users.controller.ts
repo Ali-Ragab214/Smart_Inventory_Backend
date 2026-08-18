@@ -10,25 +10,47 @@ import {
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
+  Req,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { Roles } from '../auth/roles.decorator';
 import { PaginationQueryDto } from '../utils/query.dto';
 import { CurrentUser } from '../auth/decorators/current-user/current-user.decorator';
 import { successResponse, paginatedResponse } from '../utils/response.util';
+import { UserRole } from './entities/user.entity';
 
+@ApiTags('users')
+@ApiBearerAuth()
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Roles('super_admin', 'tenant_owner')
+  @Roles(UserRole.TENANT)
   @Get()
   async findAll(@Query() query: PaginationQueryDto, @CurrentUser() user: UserResponseDto) {
     const { data, total } = await this.usersService.findAll(user, query);
     return paginatedResponse(data, query.page!, query.limit!, total);
+  }
+
+  @Get('me')
+  @ApiOperation({ summary: 'Get the current user profile' })
+  @ApiOkResponse({ type: UserResponseDto })
+  async findMe(@Req() req: any) {
+    const data = await this.usersService.findMe(req.user.id);
+    return successResponse(data);
+  }
+
+  @Patch('me')
+  @ApiOperation({ summary: 'Update the current user profile' })
+  @ApiOkResponse({ type: UserResponseDto })
+  async updateMe(@Req() req: any, @Body() updateProfileDto: UpdateProfileDto) {
+    const data = await this.usersService.updateMe(req.user.id, updateProfileDto);
+    return successResponse(data);
   }
 
   @Get(':id')
@@ -37,14 +59,14 @@ export class UsersController {
     return successResponse(data);
   }
 
-  @Roles('super_admin', 'tenant_owner')
+  @Roles(UserRole.TENANT)
   @Post()
   async create(@Body() createUserDto: CreateUserDto, @CurrentUser() user: UserResponseDto) {
     const data = await this.usersService.create(user, createUserDto);
     return successResponse(data);
   }
 
-  @Roles('super_admin', 'tenant_owner')
+  @Roles(UserRole.TENANT)
   @Patch(':id')
   async update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -55,7 +77,7 @@ export class UsersController {
     return successResponse(data);
   }
 
-  @Roles('super_admin', 'tenant_owner')
+  @Roles(UserRole.TENANT)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: UserResponseDto) {

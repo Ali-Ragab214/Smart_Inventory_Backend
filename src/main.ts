@@ -5,9 +5,16 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './utils/http-exception.filter';
+import { existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import * as express from 'express';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const uploadsDir = join(process.cwd(), 'uploads');
+  if (!existsSync(uploadsDir)) {
+    mkdirSync(uploadsDir, { recursive: true });
+  }
 
   const config = new DocumentBuilder()
     .setTitle('StockSavvy API')
@@ -19,6 +26,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
 
   SwaggerModule.setup('api', app, document);
+  app.use('/uploads', express.static(uploadsDir));
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

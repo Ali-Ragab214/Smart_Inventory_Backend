@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,6 +13,10 @@ import { StockMovementService } from '../inventory/stock-movements/stock-movemen
 import { MovementReason } from '../inventory/stock-movements/enums/movement-reason.enum';
 import { NotificationEvents } from '../notifications/events/notification-events';
 import { PoReceivedEvent } from '../notifications/events/po-received.event';
+import { PoCreatedEvent } from '../notifications/events/po-created.event';
+import { RagEvents, PurchaseOrderSavedEvent } from '../rag/rag-events';
+import { UserResponseDto } from '../users/dto/user-response.dto';
+import { UserRole } from '../users/entities/user.entity';
 
 const VALID_TRANSITIONS: Record<string, string[]> = {
   draft: ['pending_approval', 'rejected'],
@@ -41,6 +45,36 @@ export class PurchaseOrdersService {
       where: { id: saved.id },
       relations: { lineItems: true },
     });
+
+    // Emit RAG ingestion event for the new PO
+    this.eventEmitter.emit(RagEvents.PURCHASE_ORDER_SAVED, {
+      tenantId,
+      purchaseOrderId: loaded!.id,
+      vendorId: loaded!.vendorId,
+      warehouseId: loaded!.warehouseId,
+      status: loaded!.status,
+      createdBy: loaded!.createdBy,
+      negotiationRunId: loaded!.negotiationRunId,
+      lineItems: loaded!.lineItems.map((li) => ({
+        skuId: li.skuId,
+        quantity: li.quantity,
+        unitPrice: li.unitPrice,
+      })),
+    } satisfies PurchaseOrderSavedEvent);
+
+    // Emit Notification event for the new PO
+    this.eventEmitter.emit(
+      NotificationEvents.PO_CREATED,
+      new PoCreatedEvent(tenantId, {
+        purchaseOrderId: loaded!.id,
+        warehouseId: loaded!.warehouseId,
+        vendorId: loaded!.vendorId,
+        status: loaded!.status,
+        lineItemCount: loaded!.lineItems.length,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+
     return this.mapper.toResponse(loaded!);
   }
 
@@ -63,7 +97,8 @@ export class PurchaseOrdersService {
     return { data: this.mapper.toResponseList(result.data), total: result.total };
   }
 
-  async findOne(tenantId: string, id: string): Promise<PurchaseOrderResponseDto> {
+  async findOne(user: UserResponseDto, id: string): Promise<PurchaseOrderResponseDto> {
+    const tenantId = user.tenantId!;
     const po = await this.poRepository.findOne({
       where: { id, tenantId },
       relations: { lineItems: true },
@@ -71,16 +106,31 @@ export class PurchaseOrdersService {
     if (!po) {
       throw new NotFoundException({ message: 'The requested purchase order could not be found.', code: 'PURCHASE_ORDER_NOT_FOUND' });
     }
+    
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId && po.warehouseId !== user.warehouseId) {
+      throw new ForbiddenException({ message: 'You do not have permission to view this purchase order.', code: 'FORBIDDEN' });
+    }
+    
     return this.mapper.toResponse(po);
   }
 
-  async transition(tenantId: string, id: string, targetStatus: string): Promise<PurchaseOrderResponseDto> {
+  async transition(
+    user: UserResponseDto,
+    id: string,
+    targetStatus: string,
+    rating?: { ratingStars?: number; damagedUnits?: number },
+  ): Promise<PurchaseOrderResponseDto> {
+    const tenantId = user.tenantId!;
     const po = await this.poRepository.findOne({
       where: { id, tenantId },
       relations: { lineItems: true },
     });
     if (!po) {
       throw new NotFoundException({ message: 'The requested purchase order could not be found.', code: 'PURCHASE_ORDER_NOT_FOUND' });
+    }
+    
+    if (user.role === UserRole.WAREHOUSE_MANAGER && user.warehouseId && po.warehouseId !== user.warehouseId) {
+      throw new ForbiddenException({ message: 'You do not have permission to transition this purchase order.', code: 'FORBIDDEN' });
     }
 
     const allowed = VALID_TRANSITIONS[po.status] ?? [];
@@ -118,6 +168,10 @@ export class PurchaseOrdersService {
     }
 
     const previousStatus = po.status;
+    if (targetStatus === 'received' && previousStatus !== 'received') {
+      po.receiptRating = rating?.ratingStars ?? null;
+      po.damagedUnits = rating?.damagedUnits ?? null;
+    }
     po.status = targetStatus;
     const saved = await this.poRepository.save(po);
 
@@ -139,6 +193,23 @@ export class PurchaseOrdersService {
       where: { id: saved.id },
       relations: { lineItems: true },
     });
+
+    // Emit RAG ingestion event for every status change (upsert replaces old chunk)
+    this.eventEmitter.emit(RagEvents.PURCHASE_ORDER_SAVED, {
+      tenantId,
+      purchaseOrderId: loaded!.id,
+      vendorId: loaded!.vendorId,
+      warehouseId: loaded!.warehouseId,
+      status: loaded!.status,
+      createdBy: loaded!.createdBy,
+      negotiationRunId: loaded!.negotiationRunId,
+      lineItems: loaded!.lineItems.map((li) => ({
+        skuId: li.skuId,
+        quantity: li.quantity,
+        unitPrice: li.unitPrice,
+      })),
+    } satisfies PurchaseOrderSavedEvent);
+
     return this.mapper.toResponse(loaded!);
   }
 }

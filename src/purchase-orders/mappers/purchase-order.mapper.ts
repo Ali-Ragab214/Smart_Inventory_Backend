@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PurchaseOrder } from '../entities/purchase-order.entity';
 import { PurchaseOrderLineItem } from '../entities/purchase-order-line-item.entity';
-import { CreatePurchaseOrderDto, CreatePurchaseOrderLineItemDto } from '../dto/create-purchase-order.dto';
+import { CreatePurchaseOrderDto } from '../dto/create-purchase-order.dto';
+import { CreatePurchaseOrderLineItemDto } from '../dto/create-purchase-order-line-item.dto';
 import { PurchaseOrderResponseDto, PurchaseOrderLineItemResponseDto } from '../dto/purchase-order-response.dto';
 
 @Injectable()
@@ -11,6 +12,9 @@ export class PurchaseOrderMapper {
     po.vendorId = createDto.vendorId;
     po.warehouseId = createDto.warehouseId;
     po.createdBy = createDto.createdBy ?? 'manual';
+    po.approvalRequestId = createDto.approvalRequestId ?? null;
+    po.negotiationRunId = createDto.negotiationRunId ?? null;
+    po.status = createDto.status ?? 'draft';
     po.lineItems = createDto.lineItems.map((item) => this.toLineItemEntity(item));
     return po;
   }
@@ -31,7 +35,10 @@ export class PurchaseOrderMapper {
     dto.status = po.status;
     dto.createdBy = po.createdBy;
     dto.negotiationRunId = po.negotiationRunId;
+    dto.approvalRequestId = po.approvalRequestId;
     dto.lineItems = (po.lineItems ?? []).map((item) => this.toLineItemResponse(item));
+    dto.receiptRating = po.receiptRating ?? null;
+    dto.damagedUnits = po.damagedUnits ?? null;
     dto.createdAt = po.createdAt;
     dto.updatedAt = po.updatedAt;
     return dto;
